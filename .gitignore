@@ -1,0 +1,6 @@
+*.o
+*.a
+*.so
+example
+test_runner
+solve_cli
