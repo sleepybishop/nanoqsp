@@ -15,6 +15,68 @@ static double my_rand_double(double min, double max) {
   return min + r * (max - min);
 }
 
+static int verify_kkt_dense(int n, const double *D, const double *d,
+                            const double *lb, const double *ub, const double *x,
+                            double tol) {
+  for (int i = 0; i < n; i++) {
+    double grad_i = -d[i];
+    for (int j = 0; j < n; j++) {
+      grad_i += D[i * n + j] * x[j];
+    }
+    double lower = lb ? lb[i] : -INFINITY;
+    double upper = ub ? ub[i] : INFINITY;
+    double viol = 0.0;
+    if (x[i] <= lower + 1e-9) {
+      if (grad_i < 0.0)
+        viol = -grad_i;
+    } else if (x[i] >= upper - 1e-9) {
+      if (grad_i > 0.0)
+        viol = grad_i;
+    } else {
+      viol = fabs(grad_i);
+    }
+    if (viol > tol) {
+      fprintf(stderr,
+              "KKT Violation at index %d: x=%f, grad=%f, viol=%e (tol=%e)\n", i,
+              x[i], grad_i, viol, tol);
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int verify_kkt_sparse(int n, const NanoqspCSR *D, const double *d,
+                             const double *lb, const double *ub,
+                             const double *x, double tol) {
+  for (int i = 0; i < n; i++) {
+    double grad_i = -d[i];
+    int start = D->row_ptr[i];
+    int end = D->row_ptr[i + 1];
+    for (int idx = start; idx < end; idx++) {
+      grad_i += D->values[idx] * x[D->col_indices[idx]];
+    }
+    double lower = lb ? lb[i] : -INFINITY;
+    double upper = ub ? ub[i] : INFINITY;
+    double viol = 0.0;
+    if (x[i] <= lower + 1e-9) {
+      if (grad_i < 0.0)
+        viol = -grad_i;
+    } else if (x[i] >= upper - 1e-9) {
+      if (grad_i > 0.0)
+        viol = grad_i;
+    } else {
+      viol = fabs(grad_i);
+    }
+    if (viol > tol) {
+      fprintf(stderr,
+              "KKT Violation at index %d: x=%f, grad=%f, viol=%e (tol=%e)\n", i,
+              x[i], grad_i, viol, tol);
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static void generate_random_qp(int n, double *D, double *d, double *lb,
                                double *ub, int type) {
   next = 42; /* Fixed seed for cross-platform determinism */
@@ -126,11 +188,18 @@ int test_cross_verify(int test_id) {
     free(ws);
   }
 
-  /* Verify status of all solvers */
+  /* Verify status and KKT of all solvers */
   int match = 1;
   for (int s = 0; s < 5; s++) {
     if (status[s] < 0) {
       fprintf(stderr, "Strategy %d failed with status %d\n", s, status[s]);
+      match = 0;
+      break;
+    }
+    /* Verify KKT optimality directly */
+    double kkt_tol = (type == 3) ? 1e-1 : 1e-2;
+    if (!verify_kkt_dense(n, D, d, lb, ub, solutions[s], kkt_tol)) {
+      fprintf(stderr, "Strategy %d failed KKT verification\n", s);
       match = 0;
       break;
     }
@@ -194,7 +263,11 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     double ub[] = {1.0, 1.0};
     out_x[0] = 0.0;
     out_x[1] = 0.0;
-    return nanoqsp_solve_box(n, D, d, lb, ub, out_x, &config);
+    int ret = nanoqsp_solve_box(n, D, d, lb, ub, out_x, &config);
+    if (ret >= 0 && !verify_kkt_dense(n, D, d, lb, ub, out_x, 1e-5)) {
+      return -10;
+    }
+    return ret;
   } else if (test_id == 2) {
     /* Test 2: Constrained min at bounds */
     int n = 2;
@@ -204,7 +277,11 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     double ub[] = {1.0, 1.0};
     out_x[0] = 0.5;
     out_x[1] = 0.5;
-    return nanoqsp_solve_box(n, D, d, lb, ub, out_x, &config);
+    int ret = nanoqsp_solve_box(n, D, d, lb, ub, out_x, &config);
+    if (ret >= 0 && !verify_kkt_dense(n, D, d, lb, ub, out_x, 1e-5)) {
+      return -10;
+    }
+    return ret;
   } else if (test_id == 3) {
     /* Test 3: Invalid arguments check */
     return nanoqsp_solve_box(0, NULL, NULL, NULL, NULL, out_x, &config);
@@ -230,7 +307,11 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     double ub[] = {1.0, 1.0};
     out_x[0] = 0.0;
     out_x[1] = 0.0;
-    return nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
+    int ret = nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
+    if (ret >= 0 && !verify_kkt_sparse(n, &D, d, lb, ub, out_x, 1e-5)) {
+      return -10;
+    }
+    return ret;
   } else if (test_id == 12) {
     /* Test 12: Sparse constrained min at bounds */
     int n = 2;
@@ -243,7 +324,11 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     double ub[] = {1.0, 1.0};
     out_x[0] = 0.5;
     out_x[1] = 0.5;
-    return nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
+    int ret = nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
+    if (ret >= 0 && !verify_kkt_sparse(n, &D, d, lb, ub, out_x, 1e-5)) {
+      return -10;
+    }
+    return ret;
   } else if (test_id == 13) {
     /* Test 13: Sparse invalid arguments check */
     return nanoqsp_solve_box_sparse(0, NULL, NULL, NULL, NULL, out_x, &config);
