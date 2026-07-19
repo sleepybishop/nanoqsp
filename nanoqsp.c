@@ -1210,7 +1210,6 @@ static void mat_vec_dense(int m, int n, const double *restrict A,
                           const double *restrict x, double *restrict y) {
   for (int i = 0; i < m; i++) {
     double sum = 0.0;
-#pragma omp simd reduction(+ : sum)
     for (int j = 0; j < n; j++) {
       sum += A[i * n + j] * x[j];
     }
