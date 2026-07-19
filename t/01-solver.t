@@ -5,7 +5,7 @@ use Test::More;
 my @strategies = (0, 1, 2, 3, 4);
 my @strategy_names = ("Coordinate Descent", "Projected Gradient", "Accelerated Gradient", "Spectral Projected Gradient", "ADMM");
 
-plan tests => 30;
+plan tests => 35;
 
 for my $s_idx (0..$#strategies) {
     my $strat = $strategies[$s_idx];
@@ -56,3 +56,34 @@ for my $s_idx (0..$#strategies) {
         }
     }
 }
+
+{
+    my $output = `./test_runner 5`;
+    chomp($output);
+    ok($output =~ /RET:0/, "Cross-Strategy Verification - Test 5 (N=10 Randomized Bounded QP)");
+}
+
+{
+    my $output = `./test_runner 6`;
+    chomp($output);
+    ok($output =~ /RET:0/, "Cross-Strategy Verification - Test 6 (N=50 Randomized Bounded QP)");
+}
+
+{
+    my $output = `./test_runner 7`;
+    chomp($output);
+    ok($output =~ /RET:0/, "Cross-Strategy Verification - Test 7 (N=10 Unconstrained QP)");
+}
+
+{
+    my $output = `./test_runner 8`;
+    chomp($output);
+    ok($output =~ /RET:0/, "Cross-Strategy Verification - Test 8 (N=10 Semi-constrained QP)");
+}
+
+{
+    my $output = `./test_runner 9`;
+    chomp($output);
+    ok($output =~ /RET:0/, "Cross-Strategy Verification - Test 9 (N=10 Ill-conditioned QP)");
+}
+
