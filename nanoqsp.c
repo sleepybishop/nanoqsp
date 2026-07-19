@@ -469,6 +469,8 @@ static int solve_admm(int n, const double *restrict D, const double *restrict d,
 int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
                       const double *restrict lb, const double *restrict ub,
                       double *restrict x, const NanoqspConfig *config) {
+  if ((long long)n * n > 268435455LL)
+    return NANOQSP_ERR_INVALID_ARG;
   if (n <= 0 || D == NULL || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
   }
@@ -549,6 +551,8 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
                                 const double *restrict lb,
                                 const double *restrict ub, double *restrict x,
                                 const NanoqspConfig *config) {
+  if ((long long)m * n > 268435455LL || (long long)n * n > 268435455LL)
+    return NANOQSP_ERR_INVALID_ARG;
   if (m <= 0 || n <= 0 || A == NULL || b == NULL || x == NULL)
     return NANOQSP_ERR_INVALID_ARG;
 
@@ -1133,7 +1137,9 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
                              const double *restrict lb,
                              const double *restrict ub, double *restrict x,
                              const NanoqspConfig *config) {
-  if (n <= 0 || D == NULL || d == NULL || x == NULL) {
+  if (6LL * n > 268435455LL)
+    return NANOQSP_ERR_INVALID_ARG;
+  if (n <= 0 || D == NULL || D->n != n || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
   }
 
@@ -1446,6 +1452,8 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
                          const double *restrict lb_A,
                          const double *restrict ub_A, double *restrict x,
                          const NanoqspConfig *config) {
+  if ((long long)n * n > 268435455LL || (long long)m * n > 268435455LL)
+    return NANOQSP_ERR_INVALID_ARG;
   if (n <= 0 || D == NULL || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
   }
@@ -1718,10 +1726,12 @@ int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
                                 const double *restrict lb_A,
                                 const double *restrict ub_A, double *restrict x,
                                 const NanoqspConfig *config) {
-  if (n <= 0 || D == NULL || d == NULL || x == NULL) {
+  if (7LL * n + 3LL * m > 268435455LL)
+    return NANOQSP_ERR_INVALID_ARG;
+  if (n <= 0 || D == NULL || D->n != n || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
   }
-  if (m > 0 && A == NULL) {
+  if (m > 0 && (A == NULL || A->n != m)) {
     return NANOQSP_ERR_INVALID_ARG;
   }
 
