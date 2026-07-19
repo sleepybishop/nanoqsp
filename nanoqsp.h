@@ -39,11 +39,11 @@ typedef struct {
 
 /* Sparse matrix in Compressed Sparse Row (CSR) format */
 typedef struct {
-  int n;                  /* Number of rows */
-  int nnz;                /* Number of non-zero elements */
-  const double *values;   /* Array of non-zero values (size nnz) */
-  const int *col_indices; /* Array of column indices (size nnz) */
-  const int *row_ptr;     /* Array of row pointers (size n + 1) */
+  int n;                         /* Number of rows */
+  int nnz;                       /* Number of non-zero elements */
+  const double *restrict values; /* Array of non-zero values (size nnz) */
+  const int *col_indices;        /* Array of column indices (size nnz) */
+  const int *row_ptr;            /* Array of row pointers (size n + 1) */
 } NanoqspCSR;
 
 /**
@@ -83,8 +83,10 @@ int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
-int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D, const double *d,
-                             const double *lb, const double *ub, double *x,
+int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
+                             const double *restrict d,
+                             const double *restrict lb,
+                             const double *restrict ub, double *restrict x,
                              const NanoqspConfig *config);
 
 /**

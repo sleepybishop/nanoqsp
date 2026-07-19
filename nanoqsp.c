@@ -513,7 +513,8 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
   return iters;
 }
 
-static void sparse_mat_vec(const NanoqspCSR *D, const double *x, double *y) {
+static void sparse_mat_vec(const NanoqspCSR *D, const double *restrict x,
+                           double *restrict y) {
   for (int i = 0; i < D->n; i++) {
     double sum = 0.0;
     int start = D->row_ptr[i];
@@ -542,11 +543,12 @@ static double get_sparse_matrix_norm_inf(const NanoqspCSR *D) {
 }
 
 static int solve_coordinate_descent_sparse(int n, const NanoqspCSR *D,
-                                           const double *d, const double *lb,
-                                           const double *ub, double *x,
-                                           int max_iter, double tol,
-                                           double *ws) {
-  double *diag = ws;
+                                           const double *restrict d,
+                                           const double *restrict lb,
+                                           const double *restrict ub,
+                                           double *restrict x, int max_iter,
+                                           double tol, double *restrict ws) {
+  double *restrict diag = ws;
   for (int i = 0; i < n; i++) {
     diag[i] = 0.0;
     int start = D->row_ptr[i];
@@ -593,15 +595,16 @@ static int solve_coordinate_descent_sparse(int n, const NanoqspCSR *D,
 }
 
 static int solve_projected_gradient_sparse(int n, const NanoqspCSR *D,
-                                           const double *d, const double *lb,
-                                           const double *ub, double *x,
-                                           int max_iter, double tol,
-                                           double *ws) {
+                                           const double *restrict d,
+                                           const double *restrict lb,
+                                           const double *restrict ub,
+                                           double *restrict x, int max_iter,
+                                           double tol, double *restrict ws) {
   double norm_inf = get_sparse_matrix_norm_inf(D);
   double alpha = (norm_inf > 1e-12) ? (1.0 / norm_inf) : 0.1;
 
-  double *next_x = ws;
-  double *g = ws + n;
+  double *restrict next_x = ws;
+  double *restrict g = ws + n;
 
   int iter;
   for (iter = 0; iter < max_iter; iter++) {
@@ -630,16 +633,17 @@ static int solve_projected_gradient_sparse(int n, const NanoqspCSR *D,
 }
 
 static int solve_accelerated_gradient_sparse(int n, const NanoqspCSR *D,
-                                             const double *d, const double *lb,
-                                             const double *ub, double *x,
-                                             int max_iter, double tol,
-                                             double *ws) {
+                                             const double *restrict d,
+                                             const double *restrict lb,
+                                             const double *restrict ub,
+                                             double *restrict x, int max_iter,
+                                             double tol, double *restrict ws) {
   double norm_inf = get_sparse_matrix_norm_inf(D);
   double alpha = (norm_inf > 1e-12) ? (1.0 / norm_inf) : 0.1;
 
-  double *y = ws;
-  double *next_x = ws + n;
-  double *g = ws + 2 * n;
+  double *restrict y = ws;
+  double *restrict next_x = ws + n;
+  double *restrict g = ws + 2 * n;
 
   for (int i = 0; i < n; i++) {
     y[i] = x[i];
@@ -693,14 +697,15 @@ static int solve_accelerated_gradient_sparse(int n, const NanoqspCSR *D,
 }
 
 static int solve_spectral_gradient_sparse(int n, const NanoqspCSR *D,
-                                          const double *d, const double *lb,
-                                          const double *ub, double *x,
-                                          int max_iter, double tol,
-                                          double *ws) {
+                                          const double *restrict d,
+                                          const double *restrict lb,
+                                          const double *restrict ub,
+                                          double *restrict x, int max_iter,
+                                          double tol, double *restrict ws) {
   double alpha = 0.01;
-  double *next_x = ws;
-  double *grad = ws + n;
-  double *next_grad = ws + 2 * n;
+  double *restrict next_x = ws;
+  double *restrict grad = ws + n;
+  double *restrict next_grad = ws + 2 * n;
 
   sparse_mat_vec(D, x, grad);
   for (int i = 0; i < n; i++) {
@@ -760,8 +765,9 @@ static int solve_spectral_gradient_sparse(int n, const NanoqspCSR *D,
 }
 
 static void cg_solve_sparse(int n, const NanoqspCSR *D, double rho,
-                            const double *c, double *x, double *r, double *p,
-                            double *Ap) {
+                            const double *restrict c, double *restrict x,
+                            double *restrict r, double *restrict p,
+                            double *restrict Ap) {
   sparse_mat_vec(D, x, r);
   for (int i = 0; i < n; i++) {
     r[i] = c[i] - (r[i] + rho * x[i]);
@@ -800,16 +806,18 @@ static void cg_solve_sparse(int n, const NanoqspCSR *D, double rho,
   }
 }
 
-static int solve_admm_sparse(int n, const NanoqspCSR *D, const double *d,
-                             const double *lb, const double *ub, double *x,
-                             int max_iter, double tol, double *ws) {
+static int solve_admm_sparse(int n, const NanoqspCSR *D,
+                             const double *restrict d,
+                             const double *restrict lb,
+                             const double *restrict ub, double *restrict x,
+                             int max_iter, double tol, double *restrict ws) {
   double rho = 1.0;
-  double *z = ws;
-  double *y = ws + n;
-  double *c = ws + 2 * n;
-  double *r = ws + 3 * n;
-  double *p = ws + 4 * n;
-  double *Ap = ws + 5 * n;
+  double *restrict z = ws;
+  double *restrict y = ws + n;
+  double *restrict c = ws + 2 * n;
+  double *restrict r = ws + 3 * n;
+  double *restrict p = ws + 4 * n;
+  double *restrict Ap = ws + 5 * n;
 
   for (int i = 0; i < n; i++) {
     z[i] = x[i];
@@ -857,8 +865,10 @@ static int solve_admm_sparse(int n, const NanoqspCSR *D, const double *d,
   return max_iter;
 }
 
-int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D, const double *d,
-                             const double *lb, const double *ub, double *x,
+int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
+                             const double *restrict d,
+                             const double *restrict lb,
+                             const double *restrict ub, double *restrict x,
                              const NanoqspConfig *config) {
   if (n <= 0 || D == NULL || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
@@ -867,7 +877,7 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D, const double *d,
   NanoqspStrategy strategy = NANOQSP_STRATEGY_COORDINATE_DESCENT;
   int max_iterations = 1000;
   double tolerance = 1e-6;
-  double *ws = NULL;
+  double *restrict ws = NULL;
   int ws_size = 0;
 
   if (config != NULL) {
@@ -895,7 +905,7 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D, const double *d,
   int needs_free = 0;
   if (required_ws > 0) {
     if (ws == NULL || ws_size < required_ws) {
-      ws = (double *)malloc(required_ws * sizeof(double));
+      ws = (double *restrict)malloc(required_ws * sizeof(double));
       if (!ws)
         return NANOQSP_ERR_OUT_OF_MEMORY;
       needs_free = 1;
