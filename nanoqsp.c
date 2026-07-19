@@ -1332,7 +1332,9 @@ static int solve_admm_affine(int n, int m, const double *restrict D,
       }
     }
 
-    cg_solve_affine(n, m, D, A, rho, c, x, r, p, Ap, z, Ax);
+    /* Solve system (D + rho * (I + A^T * A)) x = c */
+    double *restrict tmp_n = ws + 2 * (n + m) + 4 * n + m;
+    cg_solve_affine(n, m, D, A, rho, c, x, r, p, Ap, tmp_n, Ax);
 
     double max_diff = 0.0;
     for (int i = 0; i < n; i++) {
@@ -1465,7 +1467,7 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
     ws_size = config->workspace_size;
   }
 
-  int required_ws = 6 * n + 3 * m;
+  int required_ws = 7 * n + 3 * m;
   int needs_free = 0;
   if (ws == NULL || ws_size < required_ws) {
     ws = (double *restrict)malloc(required_ws * sizeof(double));
@@ -1599,7 +1601,8 @@ static int solve_admm_affine_sparse(
     }
 
     /* Solve system (D + rho * (I + A^T * A)) x = c */
-    cg_solve_affine_sparse(n, m, D, A, rho, c, x, r, p, Ap, z, Ax);
+    double *restrict tmp_n = ws + 2 * (n + m) + 4 * n + m;
+    cg_solve_affine_sparse(n, m, D, A, rho, c, x, r, p, Ap, tmp_n, Ax);
 
     double max_diff = 0.0;
     for (int i = 0; i < n; i++) {
@@ -1736,7 +1739,7 @@ int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
     ws_size = config->workspace_size;
   }
 
-  int required_ws = 6 * n + 3 * m;
+  int required_ws = 7 * n + 3 * m;
   int needs_free = 0;
   if (ws == NULL || ws_size < required_ws) {
     ws = (double *restrict)malloc(required_ws * sizeof(double));
