@@ -2,12 +2,11 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O3 -std=c99 -I.
 LDFLAGS = -lm
 
-# SIMD configuration
-# By default, use SSE3. Set AVX=1 to compile with AVX support.
+# Default SIMD configuration for normal build targets
 ifeq ($(AVX), 1)
-  CFLAGS += -DNANOQSP_AVX -mavx
+  DEFAULT_SIMD_FLAGS = -DNANOQSP_AVX -mavx
 else
-  CFLAGS += -DNANOQSP_SSE -msse3
+  DEFAULT_SIMD_FLAGS = -DNANOQSP_SSE -msse3
 endif
 
 LIB_NAME = libnanoqsp.a
@@ -22,27 +21,62 @@ $(LIB_NAME): $(OBJS)
 	ar rcs $@ $^
 
 nanoqsp.o: nanoqsp.c nanoqsp.h nanoqsp_blas.h
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -c $< -o $@
 
 nanoqsp_blas.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -c $< -o $@
 
 $(EXAMPLE): example.c $(LIB_NAME)
-	$(CC) $(CFLAGS) -o $@ example.c -L. -lnanoqsp $(LDFLAGS)
+	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -o $@ example.c -L. -lnanoqsp $(LDFLAGS)
 
 $(TEST_RUNNER): t/test_runner.c $(LIB_NAME)
-	$(CC) $(CFLAGS) -o $@ t/test_runner.c -L. -lnanoqsp $(LDFLAGS)
+	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -o $@ t/test_runner.c -L. -lnanoqsp $(LDFLAGS)
 
 $(SOLVE_CLI): solve_cli.c $(LIB_NAME)
-	$(CC) $(CFLAGS) -o $@ solve_cli.c -L. -lnanoqsp $(LDFLAGS)
+	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -o $@ solve_cli.c -L. -lnanoqsp $(LDFLAGS)
+
+# Benchmark Targets (Classic vs SSE vs AVX comparison)
+benchmark.o: benchmark.c nanoqsp.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+nanoqsp_blas_c.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_classic.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+nanoqsp_blas_s.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_sse.c
+	$(CC) $(CFLAGS) -DNANOQSP_SSE -msse3 -c $< -o $@
+
+nanoqsp_blas_a.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_avx.c
+	$(CC) $(CFLAGS) -DNANOQSP_AVX -mavx -c $< -o $@
+
+bench_classic: benchmark.o nanoqsp.o nanoqsp_blas_c.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+bench_sse: benchmark.o nanoqsp.o nanoqsp_blas_s.o
+	$(CC) $(CFLAGS) -DNANOQSP_SSE -msse3 -o $@ $^ $(LDFLAGS)
+
+bench_avx: benchmark.o nanoqsp.o nanoqsp_blas_a.o
+	$(CC) $(CFLAGS) -DNANOQSP_AVX -mavx -o $@ $^ $(LDFLAGS)
+
+bench: bench_classic bench_sse bench_avx
+	@echo "=================================================="
+	@echo "  Running Benchmarks: Classic vs SSE3 vs AVX  "
+	@echo "=================================================="
+	@echo ""
+	./bench_classic 3
+	@echo ""
+	./bench_sse 3
+	@echo ""
+	./bench_avx 3
+	@echo ""
+	@echo "=================================================="
 
 check: all
 	prove -v t/
 
 indent:
-	clang-format -i nanoqsp.h nanoqsp.c example.c t/test_runner.c solve_cli.c nanoqsp_blas.h nanoqsp_blas.c nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c
+	clang-format -i nanoqsp.h nanoqsp.c example.c t/test_runner.c solve_cli.c nanoqsp_blas.h nanoqsp_blas.c nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c benchmark.c
 
 clean:
-	rm -f $(OBJS) $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI)
+	rm -f $(OBJS) $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) benchmark.o nanoqsp_blas_c.o nanoqsp_blas_s.o nanoqsp_blas_a.o bench_classic bench_sse bench_avx
 
-.PHONY: all clean indent check
+.PHONY: all clean indent check bench
