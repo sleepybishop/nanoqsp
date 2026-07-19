@@ -218,6 +218,46 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     out_x[0] = 0.0;
     out_x[1] = 0.0;
     return nanoqsp_solve_box(n, D, d, lb, ub, out_x, &config);
+  } else if (test_id == 11) {
+    /* Test 11: Sparse unconstrained min within bounds */
+    int n = 2;
+    double values[] = {1.0, 1.0};
+    int col_indices[] = {0, 1};
+    int row_ptr[] = {0, 1, 2};
+    NanoqspCSR D = {n, 2, values, col_indices, row_ptr};
+    double d[] = {0.5, 0.5};
+    double lb[] = {0.0, 0.0};
+    double ub[] = {1.0, 1.0};
+    out_x[0] = 0.0;
+    out_x[1] = 0.0;
+    return nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
+  } else if (test_id == 12) {
+    /* Test 12: Sparse constrained min at bounds */
+    int n = 2;
+    double values[] = {1.0, 1.0};
+    int col_indices[] = {0, 1};
+    int row_ptr[] = {0, 1, 2};
+    NanoqspCSR D = {n, 2, values, col_indices, row_ptr};
+    double d[] = {2.0, -1.0};
+    double lb[] = {0.0, 0.0};
+    double ub[] = {1.0, 1.0};
+    out_x[0] = 0.5;
+    out_x[1] = 0.5;
+    return nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
+  } else if (test_id == 13) {
+    /* Test 13: Sparse invalid arguments check */
+    return nanoqsp_solve_box_sparse(0, NULL, NULL, NULL, NULL, out_x, &config);
+  } else if (test_id == 14) {
+    /* Test 14: Sparse singular matrix */
+    int n = 2;
+    int row_ptr[] = {0, 0, 0};
+    NanoqspCSR D = {n, 0, NULL, NULL, row_ptr};
+    double d[] = {1.0, 1.0};
+    double lb[] = {0.0, 0.0};
+    double ub[] = {10.0, 10.0};
+    out_x[0] = 0.0;
+    out_x[1] = 0.0;
+    return nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
   }
   return -99;
 }

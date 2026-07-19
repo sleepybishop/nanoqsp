@@ -37,6 +37,15 @@ typedef struct {
                        */
 } NanoqspConfig;
 
+/* Sparse matrix in Compressed Sparse Row (CSR) format */
+typedef struct {
+  int n;                  /* Number of rows */
+  int nnz;                /* Number of non-zero elements */
+  const double *values;   /* Array of non-zero values (size nnz) */
+  const int *col_indices; /* Array of column indices (size nnz) */
+  const int *row_ptr;     /* Array of row pointers (size n + 1) */
+} NanoqspCSR;
+
 /**
  * Solves the box-constrained quadratic programming (QP) problem:
  *   minimize    0.5 * x^T * D * x - d^T * x
@@ -57,6 +66,26 @@ typedef struct {
 int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
                       const double *restrict lb, const double *restrict ub,
                       double *restrict x, const NanoqspConfig *config);
+
+/**
+ * Solves the box-constrained quadratic programming (QP) problem with a sparse
+ * matrix: minimize    0.5 * x^T * D * x - d^T * x subject to  lb <= x_i <= ub
+ * for all i
+ *
+ * Parameters:
+ *   n:           Number of variables
+ *   D:           Sparse positive-definite matrix in CSR format
+ *   d:           n-dimensional vector (size n)
+ *   lb, ub:      Lower/Upper bounds array (size n). If NULL, treated as
+ * -INFINITY x:           Input/Output vector (size n). Can be pre-initialized.
+ *   config:      Configuration options (if NULL, defaults are used)
+ *
+ * Returns:
+ *   Number of iterations performed on success, or a NanoqspStatus error code.
+ */
+int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D, const double *d,
+                             const double *lb, const double *ub, double *x,
+                             const NanoqspConfig *config);
 
 /**
  * High-level API: Solves a least squares problem (min ||Ax - b||^2) subject to
