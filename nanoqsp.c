@@ -1,4 +1,5 @@
 #include "nanoqsp.h"
+#include "nanoqsp_blas.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -14,10 +15,7 @@ static inline double clamp(double val, double lb, double ub) {
 static double get_matrix_norm_inf(int n, const double *D) {
   double max_row_sum = 0.0;
   for (int i = 0; i < n; i++) {
-    double row_sum = 0.0;
-    for (int j = 0; j < n; j++) {
-      row_sum += fabs(D[i * n + j]);
-    }
+    double row_sum = v_norm1(&D[i * n], n);
     if (row_sum > max_row_sum) {
       max_row_sum = row_sum;
     }
@@ -33,13 +31,7 @@ static int solve_coordinate_descent(int n, const double *D, const double *d,
   for (iter = 0; iter < max_iter; iter++) {
     double max_diff = 0.0;
     for (int i = 0; i < n; i++) {
-      double sum = 0.0;
-      for (int j = 0; j < i; j++) {
-        sum += D[i * n + j] * x[j];
-      }
-      for (int j = i + 1; j < n; j++) {
-        sum += D[i * n + j] * x[j];
-      }
+      double sum = v_dot(&D[i * n], x, n) - D[i * n + i] * x[i];
       double old_val = x[i];
       double D_ii = D[i * n + i];
       if (fabs(D_ii) > 1e-12) {
@@ -75,10 +67,7 @@ static int solve_projected_gradient(int n, const double *D, const double *d,
     double max_diff = 0.0;
 
     for (int i = 0; i < n; i++) {
-      double grad_i = 0.0;
-      for (int j = 0; j < n; j++)
-        grad_i += D[i * n + j] * x[j];
-      grad_i -= d[i];
+      double grad_i = v_dot(&D[i * n], x, n) - d[i];
 
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
@@ -89,8 +78,7 @@ static int solve_projected_gradient(int n, const double *D, const double *d,
         max_diff = diff;
     }
 
-    for (int i = 0; i < n; i++)
-      x[i] = next_x[i];
+    v_copy(x, next_x, n);
 
     if (max_diff < tol)
       return iter + 1;
@@ -110,9 +98,7 @@ static int solve_accelerated_gradient(int n, const double *D, const double *d,
   double *y = ws;
   double *next_x = ws + n;
 
-  for (int i = 0; i < n; i++) {
-    y[i] = x[i];
-  }
+  v_copy(y, x, n);
 
   double t = 1.0;
   int iter;
@@ -120,10 +106,7 @@ static int solve_accelerated_gradient(int n, const double *D, const double *d,
     double max_diff = 0.0;
 
     for (int i = 0; i < n; i++) {
-      double grad_i = 0.0;
-      for (int j = 0; j < n; j++)
-        grad_i += D[i * n + j] * y[j];
-      grad_i -= d[i];
+      double grad_i = v_dot(&D[i * n], y, n) - d[i];
 
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
@@ -135,8 +118,7 @@ static int solve_accelerated_gradient(int n, const double *D, const double *d,
     }
 
     if (max_diff < tol) {
-      for (int i = 0; i < n; i++)
-        x[i] = next_x[i];
+      v_copy(x, next_x, n);
       return iter + 1;
     }
 
@@ -148,19 +130,18 @@ static int solve_accelerated_gradient(int n, const double *D, const double *d,
 
     if (restart_check > 0.0) {
       t = 1.0;
-      for (int i = 0; i < n; i++)
+      for (int i = 0; i < n; i++) {
         y[i] = next_x[i];
+        x[i] = next_x[i];
+      }
     } else {
       double t_next = 0.5 * (1.0 + sqrt(1.0 + 4.0 * t * t));
       double beta = (t - 1.0) / t_next;
       for (int i = 0; i < n; i++) {
         y[i] = next_x[i] + beta * (next_x[i] - x[i]);
+        x[i] = next_x[i];
       }
       t = t_next;
-    }
-
-    for (int i = 0; i < n; i++) {
-      x[i] = next_x[i];
     }
   }
   return max_iter;
@@ -177,10 +158,7 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
   double *next_grad = ws + 2 * n;
 
   for (int i = 0; i < n; i++) {
-    grad[i] = 0.0;
-    for (int j = 0; j < n; j++)
-      grad[i] += D[i * n + j] * x[j];
-    grad[i] -= d[i];
+    grad[i] = v_dot(&D[i * n], x, n) - d[i];
   }
 
   int iter;
@@ -198,16 +176,12 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
     }
 
     if (max_diff < tol) {
-      for (int i = 0; i < n; i++)
-        x[i] = next_x[i];
+      v_copy(x, next_x, n);
       return iter + 1;
     }
 
     for (int i = 0; i < n; i++) {
-      next_grad[i] = 0.0;
-      for (int j = 0; j < n; j++)
-        next_grad[i] += D[i * n + j] * next_x[j];
-      next_grad[i] -= d[i];
+      next_grad[i] = v_dot(&D[i * n], next_x, n) - d[i];
     }
 
     double s_dot_s = 0.0;
@@ -229,10 +203,8 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
       alpha = val;
     }
 
-    for (int i = 0; i < n; i++) {
-      x[i] = next_x[i];
-      grad[i] = next_grad[i];
-    }
+    v_copy(x, next_x, n);
+    v_copy(grad, next_grad, n);
   }
   return max_iter;
 }
@@ -240,16 +212,12 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
 /* Strategy 5: Nano ADMM */
 static void cg_solve(int n, const double *D, double rho, const double *c,
                      double *x, double *r, double *p, double *Ap) {
-  double r_sq = 0.0;
-
   for (int i = 0; i < n; i++) {
-    double Dx_i = 0.0;
-    for (int j = 0; j < n; j++)
-      Dx_i += D[i * n + j] * x[j];
+    double Dx_i = v_dot(&D[i * n], x, n);
     r[i] = c[i] - (Dx_i + rho * x[i]);
     p[i] = r[i];
-    r_sq += r[i] * r[i];
   }
+  double r_sq = v_dot(r, r, n);
 
   for (int iter = 0; iter < n + 5; iter++) {
     if (r_sq < 1e-10)
@@ -257,9 +225,7 @@ static void cg_solve(int n, const double *D, double rho, const double *c,
 
     double pAp = 0.0;
     for (int i = 0; i < n; i++) {
-      double Dp_i = 0.0;
-      for (int j = 0; j < n; j++)
-        Dp_i += D[i * n + j] * p[j];
+      double Dp_i = v_dot(&D[i * n], p, n);
       Ap[i] = Dp_i + rho * p[i];
       pAp += p[i] * Ap[i];
     }
@@ -267,14 +233,10 @@ static void cg_solve(int n, const double *D, double rho, const double *c,
       break;
 
     double alpha = r_sq / pAp;
-    double next_r_sq = 0.0;
+    v_axpy(x, p, alpha, n);
+    v_axpy(r, Ap, -alpha, n);
 
-    for (int i = 0; i < n; i++) {
-      x[i] += alpha * p[i];
-      r[i] -= alpha * Ap[i];
-      next_r_sq += r[i] * r[i];
-    }
-
+    double next_r_sq = v_dot(r, r, n);
     double beta = next_r_sq / r_sq;
     for (int i = 0; i < n; i++) {
       p[i] = r[i] + beta * p[i];
@@ -294,10 +256,8 @@ static int solve_admm(int n, const double *D, const double *d, const double *lb,
   double *p = ws + 4 * n;
   double *Ap = ws + 5 * n;
 
-  for (int i = 0; i < n; i++) {
-    z[i] = x[i];
-    y[i] = 0.0;
-  }
+  v_copy(z, x, n);
+  v_zero(y, n);
 
   for (int iter = 0; iter < max_iter; iter++) {
     for (int i = 0; i < n; i++) {
@@ -330,13 +290,11 @@ static int solve_admm(int n, const double *D, const double *d, const double *lb,
     }
 
     if (max_diff < tol && prim_res < tol) {
-      for (int i = 0; i < n; i++)
-        x[i] = z[i];
+      v_copy(x, z, n);
       return iter + 1;
     }
   }
-  for (int i = 0; i < n; i++)
-    x[i] = z[i];
+  v_copy(x, z, n);
   return max_iter;
 }
 
@@ -414,11 +372,7 @@ int nanoqsp_solve_box(int n, const double *D, const double *d, const double *lb,
 double nanoqsp_predict(int n, const double *x, const double *feature_vector) {
   if (n <= 0 || x == NULL || feature_vector == NULL)
     return 0.0;
-  double sum = 0.0;
-  for (int i = 0; i < n; i++) {
-    sum += x[i] * feature_vector[i];
-  }
-  return sum;
+  return v_dot(x, feature_vector, n);
 }
 
 int nanoqsp_solve_least_squares(int m, int n, const double *A, const double *b,
@@ -455,8 +409,6 @@ int nanoqsp_solve_least_squares(int m, int n, const double *A, const double *b,
   if (ws != NULL && ws_size >= required_total) {
     D = ws;
     d = ws + (n * n);
-    /* The remaining (required_box) is implicitly left for solve_box if we pass
-     * modified config */
   } else {
     D = (double *)malloc(n * n * sizeof(double));
     d = (double *)malloc(n * sizeof(double));
@@ -470,10 +422,8 @@ int nanoqsp_solve_least_squares(int m, int n, const double *A, const double *b,
     needs_free = 1;
   }
 
-  for (int i = 0; i < n * n; i++)
-    D[i] = 0.0;
-  for (int i = 0; i < n; i++)
-    d[i] = 0.0;
+  v_zero(D, n * n);
+  v_zero(d, n);
 
   for (int k = 0; k < m; k++) {
     for (int i = 0; i < n; i++) {
@@ -503,8 +453,6 @@ int nanoqsp_solve_least_squares(int m, int n, const double *A, const double *b,
   const NanoqspConfig *pass_config = config;
 
   if (!needs_free && ws != NULL) {
-    /* If using user's workspace, we must pass the remainder down to solve_box
-     */
     if (config != NULL) {
       safe_config = *config;
     } else {
