@@ -20,8 +20,9 @@ OBJS = nanoqsp.o nanoqsp_blas.o
 EXAMPLE = example
 TEST_RUNNER = test_runner
 SOLVE_CLI = solve_cli
+BENCHMARK_SPARSE = benchmark_sparse
 
-all: $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI)
+all: $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) $(BENCHMARK_SPARSE)
 
 $(LIB_NAME): $(OBJS)
 	ar rcs $@ $^
@@ -77,13 +78,26 @@ bench: bench_classic bench_sse bench_avx
 	@echo ""
 	@echo "=================================================="
 
+$(BENCHMARK_SPARSE): benchmark_sparse.c $(LIB_NAME)
+	$(CC) $(CFLAGS) -o $@ benchmark_sparse.c -L. -lnanoqsp $(LDFLAGS)
+
+bench_sparse: $(BENCHMARK_SPARSE)
+	@echo "=================================================="
+	@echo "  Running Benchmarks: Sparse vs Dense Solvers    "
+	@echo "=================================================="
+	@echo ""
+	./$(BENCHMARK_SPARSE) 3
+	@echo ""
+	@echo "=================================================="
+
 check: all
 	prove -v t/
 
 indent:
-	clang-format -i nanoqsp.h nanoqsp.c example.c t/test_runner.c solve_cli.c nanoqsp_blas.h nanoqsp_blas.c nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c benchmark.c
+	clang-format -i nanoqsp.h nanoqsp.c example.c t/test_runner.c solve_cli.c nanoqsp_blas.h nanoqsp_blas.c nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c benchmark.c benchmark_sparse.c
 
 clean:
-	rm -f $(OBJS) $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) benchmark.o nanoqsp_blas_c.o nanoqsp_blas_s.o nanoqsp_blas_a.o bench_classic bench_sse bench_avx
+	rm -f $(OBJS) $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) benchmark.o nanoqsp_blas_c.o nanoqsp_blas_s.o nanoqsp_blas_a.o bench_classic bench_sse bench_avx $(BENCHMARK_SPARSE)
 
-.PHONY: all clean indent check bench
+.PHONY: all clean indent check bench bench_sparse
+
