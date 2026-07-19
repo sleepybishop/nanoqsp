@@ -5,7 +5,7 @@ use Test::More;
 my @strategies = (0, 1, 2, 3, 4);
 my @strategy_names = ("Coordinate Descent", "Projected Gradient", "Accelerated Gradient", "Spectral Projected Gradient", "ADMM");
 
-plan tests => 35;
+plan tests => 37;
 
 for my $s_idx (0..$#strategies) {
     my $strat = $strategies[$s_idx];
@@ -85,5 +85,19 @@ for my $s_idx (0..$#strategies) {
     my $output = `./test_runner 9`;
     chomp($output);
     ok($output =~ /RET:0/, "Cross-Strategy Verification - Test 9 (N=10 Ill-conditioned QP)");
+}
+
+{
+    my $output = `./test_runner 15 4`;
+    chomp($output);
+    if ($output =~ /RET:(\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
+        my ($ret, $x0, $x1) = ($1, $2, $3);
+        ok($ret >= 0, "ADMM - Test 15 (Dense General Affine QP) status ok");
+        my $err = abs($x0 - 0.142857) + abs($x1 - 0.678571);
+        ok($err < 1e-4, "ADMM - Test 15 solution close to analytical solution [0.142857, 0.678571]")
+            or diag("Got: x0=$x0, x1=$x1 (err=$err)");
+    } else {
+        fail("ADMM - Test 15 output format mismatch");
+    }
 }
 

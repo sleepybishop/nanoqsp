@@ -343,6 +343,46 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     out_x[0] = 0.0;
     out_x[1] = 0.0;
     return nanoqsp_solve_box_sparse(n, &D, d, lb, ub, out_x, &config);
+  } else if (test_id == 15) {
+    /* Test 15: Dense affine QP with general linear constraints */
+    int n = 2;
+    int m = 1;
+    double D[] = {4.0, 1.0, 1.0, 2.0};
+    double d[] = {1.0, 1.0};
+    double A[] = {1.0, 2.0};
+    double lb_x[] = {0.0, 0.0};
+    double ub_x[] = {1.0, 1.0};
+    double lb_A[] = {1.5};
+    double ub_A[] = {2.0};
+    out_x[0] = 0.0;
+    out_x[1] = 0.0;
+    NanoqspConfig admm_config = config;
+    admm_config.strategy = NANOQSP_STRATEGY_ADMM;
+    return nanoqsp_solve_affine(n, m, D, d, A, lb_x, ub_x, lb_A, ub_A, out_x,
+                                &admm_config);
+  } else if (test_id == 16) {
+    /* Test 16: Sparse affine QP with general linear constraints */
+    int n = 2;
+    int m = 1;
+    double D_vals[] = {4.0, 1.0, 1.0, 2.0};
+    int D_cols[] = {0, 1, 0, 1};
+    int D_rows[] = {0, 2, 4};
+    NanoqspCSR D = {n, 4, D_vals, D_cols, D_rows};
+    double d[] = {1.0, 1.0};
+    double A_vals[] = {1.0, 2.0};
+    int A_cols[] = {0, 1};
+    int A_rows[] = {0, 2};
+    NanoqspCSR A = {m, 2, A_vals, A_cols, A_rows};
+    double lb_x[] = {0.0, 0.0};
+    double ub_x[] = {1.0, 1.0};
+    double lb_A[] = {1.5};
+    double ub_A[] = {2.0};
+    out_x[0] = 0.0;
+    out_x[1] = 0.0;
+    NanoqspConfig admm_config = config;
+    admm_config.strategy = NANOQSP_STRATEGY_ADMM;
+    return nanoqsp_solve_affine_sparse(n, m, &D, d, &A, lb_x, ub_x, lb_A, ub_A,
+                                       out_x, &admm_config);
   }
   return -99;
 }

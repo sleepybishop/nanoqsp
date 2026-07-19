@@ -120,6 +120,59 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
 double nanoqsp_predict(int n, const double *restrict x,
                        const double *restrict feature_vector);
 
+/**
+ * Solves the quadratic programming (QP) problem with general linear
+ * constraints: minimize    0.5 * x^T * D * x - d^T * x subject to  lb_x <= x <=
+ * ub_x lb_A <= A*x <= ub_A
+ *
+ * Parameters:
+ *   n:           Number of variables
+ *   m:           Number of general linear constraints
+ *   D:           n x n symmetric positive-definite matrix (row-major, size n*n)
+ *   d:           n-dimensional vector (size n)
+ *   A:           m x n constraint matrix (row-major, size m*n)
+ *   lb_x, ub_x:  Bounds on x (size n). If NULL, treated as +/-INFINITY
+ *   lb_A, ub_A:  Bounds on A*x (size m). If NULL, treated as +/-INFINITY
+ *   x:           Input/Output vector (size n). Can be pre-initialized.
+ *   config:      Configuration options. If NULL, defaults are used.
+ *
+ * Returns:
+ *   Number of iterations performed on success, or a NanoqspStatus error code.
+ */
+int nanoqsp_solve_affine(int n, int m, const double *restrict D,
+                         const double *restrict d, const double *restrict A,
+                         const double *restrict lb_x,
+                         const double *restrict ub_x,
+                         const double *restrict lb_A,
+                         const double *restrict ub_A, double *restrict x,
+                         const NanoqspConfig *config);
+
+/**
+ * Solves the quadratic programming (QP) problem with general linear constraints
+ * and sparse matrices (CSR format).
+ *
+ * Parameters:
+ *   n:           Number of variables
+ *   m:           Number of general linear constraints
+ *   D:           Sparse positive-definite matrix in CSR format (size n x n)
+ *   d:           n-dimensional vector (size n)
+ *   A:           Sparse constraint matrix in CSR format (size m x n)
+ *   lb_x, ub_x:  Bounds on x (size n). If NULL, treated as +/-INFINITY
+ *   lb_A, ub_A:  Bounds on A*x (size m). If NULL, treated as +/-INFINITY
+ *   x:           Input/Output vector (size n). Can be pre-initialized.
+ *   config:      Configuration options. If NULL, defaults are used.
+ *
+ * Returns:
+ *   Number of iterations performed on success, or a NanoqspStatus error code.
+ */
+int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
+                                const double *restrict d, const NanoqspCSR *A,
+                                const double *restrict lb_x,
+                                const double *restrict ub_x,
+                                const double *restrict lb_A,
+                                const double *restrict ub_A, double *restrict x,
+                                const NanoqspConfig *config);
+
 #ifdef __cplusplus
 }
 #endif

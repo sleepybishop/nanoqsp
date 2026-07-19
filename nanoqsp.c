@@ -1203,3 +1203,553 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
     free(ws);
   return iters;
 }
+
+/* General Affine Constraints Helpers & Solvers */
+
+static void mat_vec_dense(int m, int n, const double *restrict A,
+                          const double *restrict x, double *restrict y) {
+  for (int i = 0; i < m; i++) {
+    double sum = 0.0;
+#pragma omp simd reduction(+ : sum)
+    for (int j = 0; j < n; j++) {
+      sum += A[i * n + j] * x[j];
+    }
+    y[i] = sum;
+  }
+}
+
+static void mat_trans_vec_dense(int m, int n, const double *restrict A,
+                                const double *restrict v, double *restrict y) {
+  v_zero(y, n);
+  for (int j = 0; j < m; j++) {
+    v_axpy(y, &A[j * n], v[j], n);
+  }
+}
+
+static void cg_solve_affine(int n, int m, const double *restrict D,
+                            const double *restrict A, double rho,
+                            const double *restrict c, double *restrict x,
+                            double *restrict r, double *restrict p,
+                            double *restrict Ap, double *restrict tmp_n,
+                            double *restrict tmp_m) {
+  /* Compute initial residual r = c - (D*x + rho*(x + A^T*(A*x))) */
+  v_zero(r, n);
+  for (int j = 0; j < n; j++) {
+    v_axpy(r, &D[j * n], x[j], n);
+  }
+
+  if (m > 0 && A != NULL) {
+    mat_vec_dense(m, n, A, x, tmp_m);
+    mat_trans_vec_dense(m, n, A, tmp_m, tmp_n);
+    for (int i = 0; i < n; i++) {
+      r[i] = c[i] - (r[i] + rho * (x[i] + tmp_n[i]));
+    }
+  } else {
+    for (int i = 0; i < n; i++) {
+      r[i] = c[i] - (r[i] + rho * x[i]);
+    }
+  }
+
+  v_copy(p, r, n);
+  double r_sq = v_dot(r, r, n);
+
+  for (int iter = 0; iter < n + 5; iter++) {
+    if (r_sq < 1e-10)
+      break;
+
+    double pAp = 0.0;
+    v_zero(Ap, n);
+    for (int j = 0; j < n; j++) {
+      v_axpy(Ap, &D[j * n], p[j], n);
+    }
+
+    if (m > 0 && A != NULL) {
+      mat_vec_dense(m, n, A, p, tmp_m);
+      mat_trans_vec_dense(m, n, A, tmp_m, tmp_n);
+      for (int i = 0; i < n; i++) {
+        Ap[i] += rho * (p[i] + tmp_n[i]);
+        pAp += p[i] * Ap[i];
+      }
+    } else {
+      for (int i = 0; i < n; i++) {
+        Ap[i] += rho * p[i];
+        pAp += p[i] * Ap[i];
+      }
+    }
+
+    if (pAp < 1e-12)
+      break;
+
+    double alpha = r_sq / pAp;
+    v_axpy(x, p, alpha, n);
+    v_axpy(r, Ap, -alpha, n);
+
+    double next_r_sq = v_dot(r, r, n);
+    double beta = next_r_sq / r_sq;
+    for (int i = 0; i < n; i++) {
+      p[i] = r[i] + beta * p[i];
+    }
+    r_sq = next_r_sq;
+  }
+}
+
+static int solve_admm_affine(int n, int m, const double *restrict D,
+                             const double *restrict d, const double *restrict A,
+                             const double *restrict lb_x,
+                             const double *restrict ub_x,
+                             const double *restrict lb_A,
+                             const double *restrict ub_A, double *restrict x,
+                             int max_iter, double tol, double *restrict ws) {
+  double rho = 1.0;
+
+  double *restrict z = ws;
+  double *restrict y = ws + n + m;
+  double *restrict c = ws + 2 * (n + m);
+  double *restrict r = ws + 2 * (n + m) + n;
+  double *restrict p = ws + 2 * (n + m) + 2 * n;
+  double *restrict Ap = ws + 2 * (n + m) + 3 * n;
+  double *restrict Ax = ws + 2 * (n + m) + 4 * n;
+
+  for (int i = 0; i < n; i++) {
+    z[i] = x[i];
+  }
+  if (m > 0 && A != NULL) {
+    mat_vec_dense(m, n, A, x, &z[n]);
+  }
+  v_zero(y, n + m);
+
+  for (int iter = 0; iter < max_iter; iter++) {
+    for (int i = 0; i < n; i++) {
+      c[i] = d[i] + rho * (z[i] - y[i]);
+    }
+    if (m > 0 && A != NULL) {
+      double *restrict diff_A = Ax;
+      for (int i = 0; i < m; i++) {
+        diff_A[i] = z[n + i] - y[n + i];
+      }
+      mat_trans_vec_dense(m, n, A, diff_A, r);
+      for (int i = 0; i < n; i++) {
+        c[i] += rho * r[i];
+      }
+    }
+
+    cg_solve_affine(n, m, D, A, rho, c, x, r, p, Ap, z, Ax);
+
+    double max_diff = 0.0;
+    for (int i = 0; i < n; i++) {
+      double old_z = z[i];
+      double lower = lb_x ? lb_x[i] : -INFINITY;
+      double upper = ub_x ? ub_x[i] : INFINITY;
+      z[i] = clamp(x[i] + y[i], lower, upper);
+      y[i] += x[i] - z[i];
+
+      double diff = fabs(z[i] - old_z);
+      if (diff > max_diff)
+        max_diff = diff;
+    }
+    if (m > 0 && A != NULL) {
+      mat_vec_dense(m, n, A, x, Ax);
+      for (int i = 0; i < m; i++) {
+        double old_z = z[n + i];
+        double lower = lb_A ? lb_A[i] : -INFINITY;
+        double upper = ub_A ? ub_A[i] : INFINITY;
+        z[n + i] = clamp(Ax[i] + y[n + i], lower, upper);
+        y[n + i] += Ax[i] - z[n + i];
+
+        double diff = fabs(z[n + i] - old_z);
+        if (diff > max_diff)
+          max_diff = diff;
+      }
+    }
+
+    double prim_res = 0.0;
+    double x_max = 0.0;
+    double z_max = 0.0;
+    for (int i = 0; i < n; i++) {
+      double res = fabs(x[i] - z[i]);
+      if (res > prim_res)
+        prim_res = res;
+      double val_x = fabs(x[i]);
+      if (val_x > x_max)
+        x_max = val_x;
+      double val_z = fabs(z[i]);
+      if (val_z > z_max)
+        z_max = val_z;
+    }
+    if (m > 0 && A != NULL) {
+      for (int i = 0; i < m; i++) {
+        double res = fabs(Ax[i] - z[n + i]);
+        if (res > prim_res)
+          prim_res = res;
+        double val_z = fabs(z[n + i]);
+        if (val_z > z_max)
+          z_max = val_z;
+      }
+    }
+
+    double y_max = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
+    for (int i = 0; i < n; i++) {
+      double val_y = fabs(y[i]);
+      if (val_y > y_max)
+        y_max = val_y;
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+    }
+    if (m > 0 && A != NULL) {
+      for (int i = 0; i < m; i++) {
+        double val_y = fabs(y[n + i]);
+        if (val_y > y_max)
+          y_max = val_y;
+      }
+    }
+
+    double *restrict temp_n = c;
+    for (int i = 0; i < n; i++) {
+      temp_n[i] = y[i] - rho * (z[i] - x[i]);
+    }
+    if (m > 0 && A != NULL) {
+      double *restrict temp_m = Ax;
+      for (int i = 0; i < m; i++) {
+        temp_m[i] = y[n + i] - rho * (z[n + i] - Ax[i]);
+      }
+      mat_trans_vec_dense(m, n, A, temp_m, r);
+      for (int i = 0; i < n; i++) {
+        temp_n[i] += r[i];
+      }
+    }
+    for (int i = 0; i < n; i++) {
+      double val_dx = fabs(d[i] - temp_n[i]);
+      if (val_dx > dx_max)
+        dx_max = val_dx;
+    }
+
+    double prim_scale = 1.0 + (x_max > z_max ? x_max : z_max);
+    double dual_scale =
+        1.0 + (y_max > d_max ? (y_max > dx_max ? y_max : dx_max)
+                             : (d_max > dx_max ? d_max : dx_max));
+
+    if (max_diff < tol * dual_scale && prim_res < tol * prim_scale) {
+      return iter + 1;
+    }
+  }
+  return max_iter;
+}
+
+int nanoqsp_solve_affine(int n, int m, const double *restrict D,
+                         const double *restrict d, const double *restrict A,
+                         const double *restrict lb_x,
+                         const double *restrict ub_x,
+                         const double *restrict lb_A,
+                         const double *restrict ub_A, double *restrict x,
+                         const NanoqspConfig *config) {
+  if (n <= 0 || D == NULL || d == NULL || x == NULL) {
+    return NANOQSP_ERR_INVALID_ARG;
+  }
+  if (m > 0 && A == NULL) {
+    return NANOQSP_ERR_INVALID_ARG;
+  }
+
+  int max_iterations = 1000;
+  double tolerance = 1e-6;
+  double *restrict ws = NULL;
+  int ws_size = 0;
+
+  if (config != NULL) {
+    if (config->max_iterations > 0)
+      max_iterations = config->max_iterations;
+    if (config->tolerance > 0.0)
+      tolerance = config->tolerance;
+    ws = config->workspace;
+    ws_size = config->workspace_size;
+  }
+
+  int required_ws = 6 * n + 3 * m;
+  int needs_free = 0;
+  if (ws == NULL || ws_size < required_ws) {
+    ws = (double *restrict)malloc(required_ws * sizeof(double));
+    if (!ws)
+      return NANOQSP_ERR_OUT_OF_MEMORY;
+    needs_free = 1;
+  }
+
+  int iters = solve_admm_affine(n, m, D, d, A, lb_x, ub_x, lb_A, ub_A, x,
+                                max_iterations, tolerance, ws);
+
+  if (needs_free)
+    free(ws);
+  return iters;
+}
+
+static void sparse_mat_trans_vec(int m, int n, const NanoqspCSR *A,
+                                 const double *restrict v, double *restrict y) {
+  v_zero(y, n);
+  for (int j = 0; j < m; j++) {
+    double val_v = v[j];
+    if (val_v == 0.0)
+      continue;
+    int start = A->row_ptr[j];
+    int end = A->row_ptr[j + 1];
+    for (int idx = start; idx < end; idx++) {
+      y[A->col_indices[idx]] += A->values[idx] * val_v;
+    }
+  }
+}
+
+static void cg_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
+                                   const NanoqspCSR *A, double rho,
+                                   const double *restrict c, double *restrict x,
+                                   double *restrict r, double *restrict p,
+                                   double *restrict Ap, double *restrict tmp_n,
+                                   double *restrict tmp_m) {
+  v_zero(r, n);
+  sparse_mat_vec(D, x, r);
+
+  if (m > 0 && A != NULL) {
+    sparse_mat_vec(A, x, tmp_m);
+    sparse_mat_trans_vec(m, n, A, tmp_m, tmp_n);
+    for (int i = 0; i < n; i++) {
+      r[i] = c[i] - (r[i] + rho * (x[i] + tmp_n[i]));
+    }
+  } else {
+    for (int i = 0; i < n; i++) {
+      r[i] = c[i] - (r[i] + rho * x[i]);
+    }
+  }
+
+  v_copy(p, r, n);
+  double r_sq = v_dot(r, r, n);
+
+  for (int iter = 0; iter < n + 5; iter++) {
+    if (r_sq < 1e-10)
+      break;
+
+    double pAp = 0.0;
+    v_zero(Ap, n);
+    sparse_mat_vec(D, p, Ap);
+
+    if (m > 0 && A != NULL) {
+      sparse_mat_vec(A, p, tmp_m);
+      sparse_mat_trans_vec(m, n, A, tmp_m, tmp_n);
+      for (int i = 0; i < n; i++) {
+        Ap[i] += rho * (p[i] + tmp_n[i]);
+        pAp += p[i] * Ap[i];
+      }
+    } else {
+      for (int i = 0; i < n; i++) {
+        Ap[i] += rho * p[i];
+        pAp += p[i] * Ap[i];
+      }
+    }
+
+    if (pAp < 1e-12)
+      break;
+
+    double alpha = r_sq / pAp;
+    v_axpy(x, p, alpha, n);
+    v_axpy(r, Ap, -alpha, n);
+
+    double next_r_sq = v_dot(r, r, n);
+    double beta = next_r_sq / r_sq;
+    for (int i = 0; i < n; i++) {
+      p[i] = r[i] + beta * p[i];
+    }
+    r_sq = next_r_sq;
+  }
+}
+
+static int solve_admm_affine_sparse(
+    int n, int m, const NanoqspCSR *D, const double *restrict d,
+    const NanoqspCSR *A, const double *restrict lb_x,
+    const double *restrict ub_x, const double *restrict lb_A,
+    const double *restrict ub_A, double *restrict x, int max_iter, double tol,
+    double *restrict ws) {
+  double rho = 1.0;
+
+  double *restrict z = ws;
+  double *restrict y = ws + n + m;
+  double *restrict c = ws + 2 * (n + m);
+  double *restrict r = ws + 2 * (n + m) + n;
+  double *restrict p = ws + 2 * (n + m) + 2 * n;
+  double *restrict Ap = ws + 2 * (n + m) + 3 * n;
+  double *restrict Ax = ws + 2 * (n + m) + 4 * n;
+
+  for (int i = 0; i < n; i++) {
+    z[i] = x[i];
+  }
+  if (m > 0 && A != NULL) {
+    sparse_mat_vec(A, x, &z[n]);
+  }
+  v_zero(y, n + m);
+
+  for (int iter = 0; iter < max_iter; iter++) {
+    for (int i = 0; i < n; i++) {
+      c[i] = d[i] + rho * (z[i] - y[i]);
+    }
+    if (m > 0 && A != NULL) {
+      double *restrict diff_A = Ax;
+      for (int i = 0; i < m; i++) {
+        diff_A[i] = z[n + i] - y[n + i];
+      }
+      sparse_mat_trans_vec(m, n, A, diff_A, r);
+      for (int i = 0; i < n; i++) {
+        c[i] += rho * r[i];
+      }
+    }
+
+    /* Solve system (D + rho * (I + A^T * A)) x = c */
+    cg_solve_affine_sparse(n, m, D, A, rho, c, x, r, p, Ap, z, Ax);
+
+    double max_diff = 0.0;
+    for (int i = 0; i < n; i++) {
+      double old_z = z[i];
+      double lower = lb_x ? lb_x[i] : -INFINITY;
+      double upper = ub_x ? ub_x[i] : INFINITY;
+      z[i] = clamp(x[i] + y[i], lower, upper);
+      y[i] += x[i] - z[i];
+
+      double diff = fabs(z[i] - old_z);
+      if (diff > max_diff)
+        max_diff = diff;
+    }
+    if (m > 0 && A != NULL) {
+      sparse_mat_vec(A, x, Ax);
+      for (int i = 0; i < m; i++) {
+        double old_z = z[n + i];
+        double lower = lb_A ? lb_A[i] : -INFINITY;
+        double upper = ub_A ? ub_A[i] : INFINITY;
+        z[n + i] = clamp(Ax[i] + y[n + i], lower, upper);
+        y[n + i] += Ax[i] - z[n + i];
+
+        double diff = fabs(z[n + i] - old_z);
+        if (diff > max_diff)
+          max_diff = diff;
+      }
+    }
+
+    double prim_res = 0.0;
+    double x_max = 0.0;
+    double z_max = 0.0;
+    for (int i = 0; i < n; i++) {
+      double res = fabs(x[i] - z[i]);
+      if (res > prim_res)
+        prim_res = res;
+      double val_x = fabs(x[i]);
+      if (val_x > x_max)
+        x_max = val_x;
+      double val_z = fabs(z[i]);
+      if (val_z > z_max)
+        z_max = val_z;
+    }
+    if (m > 0 && A != NULL) {
+      for (int i = 0; i < m; i++) {
+        double res = fabs(Ax[i] - z[n + i]);
+        if (res > prim_res)
+          prim_res = res;
+        double val_z = fabs(z[n + i]);
+        if (val_z > z_max)
+          z_max = val_z;
+      }
+    }
+
+    double y_max = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
+    for (int i = 0; i < n; i++) {
+      double val_y = fabs(y[i]);
+      if (val_y > y_max)
+        y_max = val_y;
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+    }
+    if (m > 0 && A != NULL) {
+      for (int i = 0; i < m; i++) {
+        double val_y = fabs(y[n + i]);
+        if (val_y > y_max)
+          y_max = val_y;
+      }
+    }
+
+    double *restrict temp_n = c;
+    for (int i = 0; i < n; i++) {
+      temp_n[i] = y[i] - rho * (z[i] - x[i]);
+    }
+    if (m > 0 && A != NULL) {
+      double *restrict temp_m = Ax;
+      for (int i = 0; i < m; i++) {
+        temp_m[i] = y[n + i] - rho * (z[n + i] - Ax[i]);
+      }
+      sparse_mat_trans_vec(m, n, A, temp_m, r);
+      for (int i = 0; i < n; i++) {
+        temp_n[i] += r[i];
+      }
+    }
+    for (int i = 0; i < n; i++) {
+      double val_dx = fabs(d[i] - temp_n[i]);
+      if (val_dx > dx_max)
+        dx_max = val_dx;
+    }
+
+    double prim_scale = 1.0 + (x_max > z_max ? x_max : z_max);
+    double dual_scale =
+        1.0 + (y_max > d_max ? (y_max > dx_max ? y_max : dx_max)
+                             : (d_max > dx_max ? d_max : dx_max));
+
+    if (max_diff < tol * dual_scale && prim_res < tol * prim_scale) {
+      for (int i = 0; i < n; i++)
+        x[i] = z[i];
+      return iter + 1;
+    }
+  }
+  for (int i = 0; i < n; i++)
+    x[i] = z[i];
+  return max_iter;
+}
+
+int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
+                                const double *restrict d, const NanoqspCSR *A,
+                                const double *restrict lb_x,
+                                const double *restrict ub_x,
+                                const double *restrict lb_A,
+                                const double *restrict ub_A, double *restrict x,
+                                const NanoqspConfig *config) {
+  if (n <= 0 || D == NULL || d == NULL || x == NULL) {
+    return NANOQSP_ERR_INVALID_ARG;
+  }
+  if (m > 0 && A == NULL) {
+    return NANOQSP_ERR_INVALID_ARG;
+  }
+
+  int max_iterations = 1000;
+  double tolerance = 1e-6;
+  double *restrict ws = NULL;
+  int ws_size = 0;
+
+  if (config != NULL) {
+    if (config->max_iterations > 0)
+      max_iterations = config->max_iterations;
+    if (config->tolerance > 0.0)
+      tolerance = config->tolerance;
+    ws = config->workspace;
+    ws_size = config->workspace_size;
+  }
+
+  int required_ws = 6 * n + 3 * m;
+  int needs_free = 0;
+  if (ws == NULL || ws_size < required_ws) {
+    ws = (double *restrict)malloc(required_ws * sizeof(double));
+    if (!ws)
+      return NANOQSP_ERR_OUT_OF_MEMORY;
+    needs_free = 1;
+  }
+
+  int iters = solve_admm_affine_sparse(n, m, D, d, A, lb_x, ub_x, lb_A, ub_A, x,
+                                       max_iterations, tolerance, ws);
+
+  if (needs_free)
+    free(ws);
+  return iters;
+}
