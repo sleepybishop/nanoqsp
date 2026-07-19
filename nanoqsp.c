@@ -66,8 +66,13 @@ static int solve_projected_gradient(int n, const double *D, const double *d,
   for (iter = 0; iter < max_iter; iter++) {
     double max_diff = 0.0;
 
+    v_zero(next_x, n);
+    for (int j = 0; j < n; j++) {
+      v_axpy(next_x, &D[j * n], x[j], n);
+    }
+
     for (int i = 0; i < n; i++) {
-      double grad_i = v_dot(&D[i * n], x, n) - d[i];
+      double grad_i = next_x[i] - d[i];
 
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
@@ -105,8 +110,13 @@ static int solve_accelerated_gradient(int n, const double *D, const double *d,
   for (iter = 0; iter < max_iter; iter++) {
     double max_diff = 0.0;
 
+    v_zero(next_x, n);
+    for (int j = 0; j < n; j++) {
+      v_axpy(next_x, &D[j * n], y[j], n);
+    }
+
     for (int i = 0; i < n; i++) {
-      double grad_i = v_dot(&D[i * n], y, n) - d[i];
+      double grad_i = next_x[i] - d[i];
 
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
@@ -157,8 +167,12 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
   double *grad = ws + n;
   double *next_grad = ws + 2 * n;
 
+  v_zero(grad, n);
+  for (int j = 0; j < n; j++) {
+    v_axpy(grad, &D[j * n], x[j], n);
+  }
   for (int i = 0; i < n; i++) {
-    grad[i] = v_dot(&D[i * n], x, n) - d[i];
+    grad[i] -= d[i];
   }
 
   int iter;
@@ -180,8 +194,12 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
       return iter + 1;
     }
 
+    v_zero(next_grad, n);
+    for (int j = 0; j < n; j++) {
+      v_axpy(next_grad, &D[j * n], next_x[j], n);
+    }
     for (int i = 0; i < n; i++) {
-      next_grad[i] = v_dot(&D[i * n], next_x, n) - d[i];
+      next_grad[i] -= d[i];
     }
 
     double s_dot_s = 0.0;
@@ -212,9 +230,12 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
 /* Strategy 5: Nano ADMM */
 static void cg_solve(int n, const double *D, double rho, const double *c,
                      double *x, double *r, double *p, double *Ap) {
+  v_zero(r, n);
+  for (int j = 0; j < n; j++) {
+    v_axpy(r, &D[j * n], x[j], n);
+  }
   for (int i = 0; i < n; i++) {
-    double Dx_i = v_dot(&D[i * n], x, n);
-    r[i] = c[i] - (Dx_i + rho * x[i]);
+    r[i] = c[i] - (r[i] + rho * x[i]);
     p[i] = r[i];
   }
   double r_sq = v_dot(r, r, n);
@@ -224,9 +245,12 @@ static void cg_solve(int n, const double *D, double rho, const double *c,
       break;
 
     double pAp = 0.0;
+    v_zero(Ap, n);
+    for (int j = 0; j < n; j++) {
+      v_axpy(Ap, &D[j * n], p[j], n);
+    }
     for (int i = 0; i < n; i++) {
-      double Dp_i = v_dot(&D[i * n], p, n);
-      Ap[i] = Dp_i + rho * p[i];
+      Ap[i] += rho * p[i];
       pAp += p[i] * Ap[i];
     }
     if (pAp < 1e-12)

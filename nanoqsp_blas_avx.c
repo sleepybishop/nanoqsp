@@ -59,6 +59,8 @@ double v_norm1(const double *restrict x, int n) {
 }
 
 void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
+  if (alpha == 0.0)
+    return;
   __m256d a = _mm256_set1_pd(alpha);
   int i = 0;
   for (; i <= n - 4; i += 4) {

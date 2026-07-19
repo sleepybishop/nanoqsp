@@ -30,6 +30,8 @@ double v_norm1(const double *restrict x, int n) {
 }
 
 void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
+  if (alpha == 0.0)
+    return;
   for (int i = 0; i < n; i++) {
     y[i] += alpha * x[i];
   }

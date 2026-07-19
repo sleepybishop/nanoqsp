@@ -59,6 +59,8 @@ double v_norm1(const double *restrict x, int n) {
 }
 
 void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
+  if (alpha == 0.0)
+    return;
   __m128d a = _mm_set1_pd(alpha);
   int i = 0;
   for (; i <= n - 2; i += 2) {
