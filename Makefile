@@ -2,9 +2,15 @@ CC = gcc
 CFLAGS = -Wall -Wextra -O3 -std=c99 -I.
 LDFLAGS = -lm
 
-# Default SIMD configuration for normal build targets
-ifeq ($(AVX), 1)
+# SIMD configuration
+ifeq ($(CLASSIC), 1)
+  DEFAULT_SIMD_FLAGS =
+else ifeq ($(AVX), 1)
   DEFAULT_SIMD_FLAGS = -DNANOQSP_AVX -mavx
+else ifeq ($(NEON), 1)
+  DEFAULT_SIMD_FLAGS = -DNANOQSP_NEON
+else ifeq ($(RVV), 1)
+  DEFAULT_SIMD_FLAGS = -DNANOQSP_RVV
 else
   DEFAULT_SIMD_FLAGS = -DNANOQSP_SSE -msse3
 endif
@@ -23,8 +29,9 @@ $(LIB_NAME): $(OBJS)
 nanoqsp.o: nanoqsp.c nanoqsp.h nanoqsp_blas.h
 	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -c $< -o $@
 
-nanoqsp_blas.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c
+nanoqsp_blas.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c nanoqsp_blas_neon.c nanoqsp_blas_rvv.c
 	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -c $< -o $@
+
 
 $(EXAMPLE): example.c $(LIB_NAME)
 	$(CC) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -o $@ example.c -L. -lnanoqsp $(LDFLAGS)

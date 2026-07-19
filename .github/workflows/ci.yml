@@ -7,16 +7,60 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build-and-test:
+  ci-x86-classic:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
-
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential perl
+    - name: Compile and Run Tests (Classic Scalar)
+      run: make CLASSIC=1 check
 
-    - name: Compile and Run Tests
+  ci-x86-sse:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential perl
+    - name: Compile and Run Tests (SSE3 SIMD)
       run: make check
+
+  ci-x86-avx:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential perl
+    - name: Compile and Run Tests (AVX SIMD)
+      run: make AVX=1 check
+
+  ci-arm64-neon:
+    runs-on: ubuntu-24.04-arm
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential perl
+    - name: Compile and Run Tests (ARM NEON Native)
+      run: make NEON=1 check
+
+  ci-riscv64-rvv:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-user-static binfmt-support gcc-riscv64-linux-gnu libc6-dev-riscv64-cross perl
+    - name: Compile and Run Tests (RISC-V Vector Emulated)
+      env:
+        QEMU_LD_PREFIX: /usr/riscv64-linux-gnu
+      run: |
+        make CC=riscv64-linux-gnu-gcc RVV=1 CFLAGS="-Wall -Wextra -O3 -std=c99 -I. -march=rv64gcv -mabi=lp64d" check
