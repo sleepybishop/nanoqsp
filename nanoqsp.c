@@ -50,21 +50,34 @@ static int solve_coordinate_descent(int n, const double *restrict D,
     }
     if (max_diff < tol) {
       double max_kkt = 0.0;
+      double d_max = 0.0;
+      double dx_max = 0.0;
       for (int i = 0; i < n; i++) {
         double grad_i = v_dot(&D[i * n], x, n) - d[i];
         double lower = lb ? lb[i] : -INFINITY;
         double upper = ub ? ub[i] : INFINITY;
         double viol = 0.0;
         if (x[i] <= lower) {
-          if (grad_i < 0.0) viol = -grad_i;
+          if (grad_i < 0.0)
+            viol = -grad_i;
         } else if (x[i] >= upper) {
-          if (grad_i > 0.0) viol = grad_i;
+          if (grad_i > 0.0)
+            viol = grad_i;
         } else {
           viol = fabs(grad_i);
         }
-        if (viol > max_kkt) max_kkt = viol;
+        if (viol > max_kkt)
+          max_kkt = viol;
+
+        double val_d = fabs(d[i]);
+        if (val_d > d_max)
+          d_max = val_d;
+        double val_dx = fabs(grad_i + d[i]);
+        if (val_dx > dx_max)
+          dx_max = val_dx;
       }
-      if (max_kkt < tol) {
+      double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+      if (max_kkt < tol * scale) {
         return iter + 1;
       }
     }
@@ -92,28 +105,41 @@ static int solve_projected_gradient(int n, const double *restrict D,
     }
 
     double max_kkt = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
     for (int i = 0; i < n; i++) {
       double grad_i = next_x[i] - d[i];
 
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
-      
+
       double viol = 0.0;
       if (x[i] <= lower) {
-        if (grad_i < 0.0) viol = -grad_i;
+        if (grad_i < 0.0)
+          viol = -grad_i;
       } else if (x[i] >= upper) {
-        if (grad_i > 0.0) viol = grad_i;
+        if (grad_i > 0.0)
+          viol = grad_i;
       } else {
         viol = fabs(grad_i);
       }
-      if (viol > max_kkt) max_kkt = viol;
+      if (viol > max_kkt)
+        max_kkt = viol;
+
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+      double val_dx = fabs(grad_i + d[i]);
+      if (val_dx > dx_max)
+        dx_max = val_dx;
 
       next_x[i] = clamp(x[i] - alpha * grad_i, lower, upper);
     }
 
     v_copy(x, next_x, n);
 
-    if (max_kkt < tol)
+    double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+    if (max_kkt < tol * scale)
       return iter + 1;
   }
   return max_iter;
@@ -163,21 +189,34 @@ static int solve_accelerated_gradient(int n, const double *restrict D,
         v_axpy(y, &D[j * n], next_x[j], n);
       }
       double max_kkt = 0.0;
+      double d_max = 0.0;
+      double dx_max = 0.0;
       for (int i = 0; i < n; i++) {
         double grad_i = y[i] - d[i];
         double lower = lb ? lb[i] : -INFINITY;
         double upper = ub ? ub[i] : INFINITY;
         double viol = 0.0;
         if (next_x[i] <= lower) {
-          if (grad_i < 0.0) viol = -grad_i;
+          if (grad_i < 0.0)
+            viol = -grad_i;
         } else if (next_x[i] >= upper) {
-          if (grad_i > 0.0) viol = grad_i;
+          if (grad_i > 0.0)
+            viol = grad_i;
         } else {
           viol = fabs(grad_i);
         }
-        if (viol > max_kkt) max_kkt = viol;
+        if (viol > max_kkt)
+          max_kkt = viol;
+
+        double val_d = fabs(d[i]);
+        if (val_d > d_max)
+          d_max = val_d;
+        double val_dx = fabs(grad_i + d[i]);
+        if (val_dx > dx_max)
+          dx_max = val_dx;
       }
-      if (max_kkt < tol) {
+      double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+      if (max_kkt < tol * scale) {
         v_copy(x, next_x, n);
         return iter + 1;
       }
@@ -231,21 +270,34 @@ static int solve_spectral_gradient(int n, const double *restrict D,
   int iter;
   for (iter = 0; iter < max_iter; iter++) {
     double max_kkt = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
     for (int i = 0; i < n; i++) {
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
       double viol = 0.0;
       if (x[i] <= lower) {
-        if (grad[i] < 0.0) viol = -grad[i];
+        if (grad[i] < 0.0)
+          viol = -grad[i];
       } else if (x[i] >= upper) {
-        if (grad[i] > 0.0) viol = grad[i];
+        if (grad[i] > 0.0)
+          viol = grad[i];
       } else {
         viol = fabs(grad[i]);
       }
-      if (viol > max_kkt) max_kkt = viol;
+      if (viol > max_kkt)
+        max_kkt = viol;
+
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+      double val_dx = fabs(grad[i] + d[i]);
+      if (val_dx > dx_max)
+        dx_max = val_dx;
     }
 
-    if (max_kkt < tol) {
+    double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+    if (max_kkt < tol * scale) {
       return iter;
     }
 
@@ -371,13 +423,41 @@ static int solve_admm(int n, const double *restrict D, const double *restrict d,
     }
 
     double prim_res = 0.0;
+    double x_max = 0.0;
+    double z_max = 0.0;
     for (int i = 0; i < n; i++) {
       double res = fabs(x[i] - z[i]);
       if (res > prim_res)
         prim_res = res;
+      double val_x = fabs(x[i]);
+      if (val_x > x_max)
+        x_max = val_x;
+      double val_z = fabs(z[i]);
+      if (val_z > z_max)
+        z_max = val_z;
     }
 
-    if (max_diff < tol && prim_res < tol) {
+    double y_max = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
+    for (int i = 0; i < n; i++) {
+      double val_y = fabs(y[i]);
+      if (val_y > y_max)
+        y_max = val_y;
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+      double val_dx = fabs(d[i] - y[i] + rho * (z[i] - x[i]));
+      if (val_dx > dx_max)
+        dx_max = val_dx;
+    }
+
+    double prim_scale = 1.0 + (x_max > z_max ? x_max : z_max);
+    double dual_scale =
+        1.0 + (y_max > d_max ? (y_max > dx_max ? y_max : dx_max)
+                             : (d_max > dx_max ? d_max : dx_max));
+
+    if (max_diff < tol * dual_scale && prim_res < tol * prim_scale) {
       v_copy(x, z, n);
       return iter + 1;
     }
@@ -641,6 +721,8 @@ static int solve_coordinate_descent_sparse(int n, const NanoqspCSR *D,
     }
     if (max_diff < tol) {
       double max_kkt = 0.0;
+      double d_max = 0.0;
+      double dx_max = 0.0;
       double *restrict g_temp = ws;
       sparse_mat_vec(D, x, g_temp);
       for (int i = 0; i < n; i++) {
@@ -649,15 +731,26 @@ static int solve_coordinate_descent_sparse(int n, const NanoqspCSR *D,
         double upper = ub ? ub[i] : INFINITY;
         double viol = 0.0;
         if (x[i] <= lower) {
-          if (grad_i < 0.0) viol = -grad_i;
+          if (grad_i < 0.0)
+            viol = -grad_i;
         } else if (x[i] >= upper) {
-          if (grad_i > 0.0) viol = grad_i;
+          if (grad_i > 0.0)
+            viol = grad_i;
         } else {
           viol = fabs(grad_i);
         }
-        if (viol > max_kkt) max_kkt = viol;
+        if (viol > max_kkt)
+          max_kkt = viol;
+
+        double val_d = fabs(d[i]);
+        if (val_d > d_max)
+          d_max = val_d;
+        double val_dx = fabs(grad_i + d[i]);
+        if (val_dx > dx_max)
+          dx_max = val_dx;
       }
-      if (max_kkt < tol) {
+      double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+      if (max_kkt < tol * scale) {
         return iter + 1;
       }
     }
@@ -682,20 +775,32 @@ static int solve_projected_gradient_sparse(int n, const NanoqspCSR *D,
     sparse_mat_vec(D, x, g);
 
     double max_kkt = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
     for (int i = 0; i < n; i++) {
       double grad_i = g[i] - d[i];
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
-      
+
       double viol = 0.0;
       if (x[i] <= lower) {
-        if (grad_i < 0.0) viol = -grad_i;
+        if (grad_i < 0.0)
+          viol = -grad_i;
       } else if (x[i] >= upper) {
-        if (grad_i > 0.0) viol = grad_i;
+        if (grad_i > 0.0)
+          viol = grad_i;
       } else {
         viol = fabs(grad_i);
       }
-      if (viol > max_kkt) max_kkt = viol;
+      if (viol > max_kkt)
+        max_kkt = viol;
+
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+      double val_dx = fabs(grad_i + d[i]);
+      if (val_dx > dx_max)
+        dx_max = val_dx;
 
       next_x[i] = clamp(x[i] - alpha * grad_i, lower, upper);
     }
@@ -703,7 +808,8 @@ static int solve_projected_gradient_sparse(int n, const NanoqspCSR *D,
     for (int i = 0; i < n; i++)
       x[i] = next_x[i];
 
-    if (max_kkt < tol) {
+    double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+    if (max_kkt < tol * scale) {
       return iter + 1;
     }
   }
@@ -747,21 +853,34 @@ static int solve_accelerated_gradient_sparse(int n, const NanoqspCSR *D,
     if (max_diff < tol) {
       sparse_mat_vec(D, next_x, g);
       double max_kkt = 0.0;
+      double d_max = 0.0;
+      double dx_max = 0.0;
       for (int i = 0; i < n; i++) {
         double grad_i = g[i] - d[i];
         double lower = lb ? lb[i] : -INFINITY;
         double upper = ub ? ub[i] : INFINITY;
         double viol = 0.0;
         if (next_x[i] <= lower) {
-          if (grad_i < 0.0) viol = -grad_i;
+          if (grad_i < 0.0)
+            viol = -grad_i;
         } else if (next_x[i] >= upper) {
-          if (grad_i > 0.0) viol = grad_i;
+          if (grad_i > 0.0)
+            viol = grad_i;
         } else {
           viol = fabs(grad_i);
         }
-        if (viol > max_kkt) max_kkt = viol;
+        if (viol > max_kkt)
+          max_kkt = viol;
+
+        double val_d = fabs(d[i]);
+        if (val_d > d_max)
+          d_max = val_d;
+        double val_dx = fabs(grad_i + d[i]);
+        if (val_dx > dx_max)
+          dx_max = val_dx;
       }
-      if (max_kkt < tol) {
+      double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+      if (max_kkt < tol * scale) {
         for (int i = 0; i < n; i++)
           x[i] = next_x[i];
         return iter + 1;
@@ -811,21 +930,34 @@ static int solve_spectral_gradient_sparse(int n, const NanoqspCSR *D,
   int iter;
   for (iter = 0; iter < max_iter; iter++) {
     double max_kkt = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
     for (int i = 0; i < n; i++) {
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
       double viol = 0.0;
       if (x[i] <= lower) {
-        if (grad[i] < 0.0) viol = -grad[i];
+        if (grad[i] < 0.0)
+          viol = -grad[i];
       } else if (x[i] >= upper) {
-        if (grad[i] > 0.0) viol = grad[i];
+        if (grad[i] > 0.0)
+          viol = grad[i];
       } else {
         viol = fabs(grad[i]);
       }
-      if (viol > max_kkt) max_kkt = viol;
+      if (viol > max_kkt)
+        max_kkt = viol;
+
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+      double val_dx = fabs(grad[i] + d[i]);
+      if (val_dx > dx_max)
+        dx_max = val_dx;
     }
 
-    if (max_kkt < tol) {
+    double scale = 1.0 + (d_max > dx_max ? d_max : dx_max);
+    if (max_kkt < tol * scale) {
       return iter;
     }
 
@@ -951,13 +1083,41 @@ static int solve_admm_sparse(int n, const NanoqspCSR *D,
     }
 
     double prim_res = 0.0;
+    double x_max = 0.0;
+    double z_max = 0.0;
     for (int i = 0; i < n; i++) {
       double res = fabs(x[i] - z[i]);
       if (res > prim_res)
         prim_res = res;
+      double val_x = fabs(x[i]);
+      if (val_x > x_max)
+        x_max = val_x;
+      double val_z = fabs(z[i]);
+      if (val_z > z_max)
+        z_max = val_z;
     }
 
-    if (max_diff < tol && prim_res < tol) {
+    double y_max = 0.0;
+    double d_max = 0.0;
+    double dx_max = 0.0;
+    for (int i = 0; i < n; i++) {
+      double val_y = fabs(y[i]);
+      if (val_y > y_max)
+        y_max = val_y;
+      double val_d = fabs(d[i]);
+      if (val_d > d_max)
+        d_max = val_d;
+      double val_dx = fabs(d[i] - y[i] + rho * (z[i] - x[i]));
+      if (val_dx > dx_max)
+        dx_max = val_dx;
+    }
+
+    double prim_scale = 1.0 + (x_max > z_max ? x_max : z_max);
+    double dual_scale =
+        1.0 + (y_max > d_max ? (y_max > dx_max ? y_max : dx_max)
+                             : (d_max > dx_max ? d_max : dx_max));
+
+    if (max_diff < tol * dual_scale && prim_res < tol * prim_scale) {
       for (int i = 0; i < n; i++)
         x[i] = z[i];
       return iter + 1;
