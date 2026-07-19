@@ -32,7 +32,7 @@ typedef struct {
   NanoqspStrategy strategy;
   int max_iterations;
   double tolerance;
-  double *workspace;  /* Optional: Pre-allocated workspace buffer */
+  double *restrict workspace; /* Optional: Pre-allocated workspace buffer */
   int workspace_size; /* Size of workspace buffer in terms of number of doubles
                        */
 } NanoqspConfig;
@@ -54,8 +54,9 @@ typedef struct {
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
-int nanoqsp_solve_box(int n, const double *D, const double *d, const double *lb,
-                      const double *ub, double *x, const NanoqspConfig *config);
+int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
+                      const double *restrict lb, const double *restrict ub,
+                      double *restrict x, const NanoqspConfig *config);
 
 /**
  * High-level API: Solves a least squares problem (min ||Ax - b||^2) subject to
@@ -75,15 +76,18 @@ int nanoqsp_solve_box(int n, const double *D, const double *d, const double *lb,
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
-int nanoqsp_solve_least_squares(int m, int n, const double *A, const double *b,
-                                const double *lb, const double *ub, double *x,
+int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
+                                const double *restrict b,
+                                const double *restrict lb,
+                                const double *restrict ub, double *restrict x,
                                 const NanoqspConfig *config);
 
 /**
  * High-level API: Generates a prediction (dot product) given a solved model x
  * and a new feature vector.
  */
-double nanoqsp_predict(int n, const double *x, const double *feature_vector);
+double nanoqsp_predict(int n, const double *restrict x,
+                       const double *restrict feature_vector);
 
 #ifdef __cplusplus
 }

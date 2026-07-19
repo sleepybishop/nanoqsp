@@ -12,7 +12,7 @@ static inline double clamp(double val, double lb, double ub) {
   return val;
 }
 
-static double get_matrix_norm_inf(int n, const double *D) {
+static double get_matrix_norm_inf(int n, const double *restrict D) {
   double max_row_sum = 0.0;
   for (int i = 0; i < n; i++) {
     double row_sum = v_norm1(&D[i * n], n);
@@ -24,9 +24,12 @@ static double get_matrix_norm_inf(int n, const double *D) {
 }
 
 /* Strategy 1: Coordinate Descent */
-static int solve_coordinate_descent(int n, const double *D, const double *d,
-                                    const double *lb, const double *ub,
-                                    double *x, int max_iter, double tol) {
+static int solve_coordinate_descent(int n, const double *restrict D,
+                                    const double *restrict d,
+                                    const double *restrict lb,
+                                    const double *restrict ub,
+                                    double *restrict x, int max_iter,
+                                    double tol) {
   int iter;
   for (iter = 0; iter < max_iter; iter++) {
     double max_diff = 0.0;
@@ -53,14 +56,16 @@ static int solve_coordinate_descent(int n, const double *D, const double *d,
 }
 
 /* Strategy 2: Projected Gradient Descent */
-static int solve_projected_gradient(int n, const double *D, const double *d,
-                                    const double *lb, const double *ub,
-                                    double *x, int max_iter, double tol,
-                                    double *ws) {
+static int solve_projected_gradient(int n, const double *restrict D,
+                                    const double *restrict d,
+                                    const double *restrict lb,
+                                    const double *restrict ub,
+                                    double *restrict x, int max_iter,
+                                    double tol, double *restrict ws) {
   double norm_inf = get_matrix_norm_inf(n, D);
   double alpha = (norm_inf > 1e-12) ? (1.0 / norm_inf) : 0.1;
 
-  double *next_x = ws;
+  double *restrict next_x = ws;
 
   int iter;
   for (iter = 0; iter < max_iter; iter++) {
@@ -93,15 +98,17 @@ static int solve_projected_gradient(int n, const double *D, const double *d,
 
 /* Strategy 3: Nesterov Accelerated Projected Gradient Descent with Adaptive
  * Restarts */
-static int solve_accelerated_gradient(int n, const double *D, const double *d,
-                                      const double *lb, const double *ub,
-                                      double *x, int max_iter, double tol,
-                                      double *ws) {
+static int solve_accelerated_gradient(int n, const double *restrict D,
+                                      const double *restrict d,
+                                      const double *restrict lb,
+                                      const double *restrict ub,
+                                      double *restrict x, int max_iter,
+                                      double tol, double *restrict ws) {
   double norm_inf = get_matrix_norm_inf(n, D);
   double alpha = (norm_inf > 1e-12) ? (1.0 / norm_inf) : 0.1;
 
-  double *y = ws;
-  double *next_x = ws + n;
+  double *restrict y = ws;
+  double *restrict next_x = ws + n;
 
   v_copy(y, x, n);
 
@@ -158,14 +165,16 @@ static int solve_accelerated_gradient(int n, const double *D, const double *d,
 }
 
 /* Strategy 4: Spectral Projected Gradient (SPG) */
-static int solve_spectral_gradient(int n, const double *D, const double *d,
-                                   const double *lb, const double *ub,
-                                   double *x, int max_iter, double tol,
-                                   double *ws) {
+static int solve_spectral_gradient(int n, const double *restrict D,
+                                   const double *restrict d,
+                                   const double *restrict lb,
+                                   const double *restrict ub,
+                                   double *restrict x, int max_iter, double tol,
+                                   double *restrict ws) {
   double alpha = 0.01;
-  double *next_x = ws;
-  double *grad = ws + n;
-  double *next_grad = ws + 2 * n;
+  double *restrict next_x = ws;
+  double *restrict grad = ws + n;
+  double *restrict next_grad = ws + 2 * n;
 
   v_zero(grad, n);
   for (int j = 0; j < n; j++) {
@@ -228,8 +237,10 @@ static int solve_spectral_gradient(int n, const double *D, const double *d,
 }
 
 /* Strategy 5: Nano ADMM */
-static void cg_solve(int n, const double *D, double rho, const double *c,
-                     double *x, double *r, double *p, double *Ap) {
+static void cg_solve(int n, const double *restrict D, double rho,
+                     const double *restrict c, double *restrict x,
+                     double *restrict r, double *restrict p,
+                     double *restrict Ap) {
   v_zero(r, n);
   for (int j = 0; j < n; j++) {
     v_axpy(r, &D[j * n], x[j], n);
@@ -269,16 +280,17 @@ static void cg_solve(int n, const double *D, double rho, const double *c,
   }
 }
 
-static int solve_admm(int n, const double *D, const double *d, const double *lb,
-                      const double *ub, double *x, int max_iter, double tol,
-                      double *ws) {
+static int solve_admm(int n, const double *restrict D, const double *restrict d,
+                      const double *restrict lb, const double *restrict ub,
+                      double *restrict x, int max_iter, double tol,
+                      double *restrict ws) {
   double rho = 1.0;
-  double *z = ws;
-  double *y = ws + n;
-  double *c = ws + 2 * n;
-  double *r = ws + 3 * n;
-  double *p = ws + 4 * n;
-  double *Ap = ws + 5 * n;
+  double *restrict z = ws;
+  double *restrict y = ws + n;
+  double *restrict c = ws + 2 * n;
+  double *restrict r = ws + 3 * n;
+  double *restrict p = ws + 4 * n;
+  double *restrict Ap = ws + 5 * n;
 
   v_copy(z, x, n);
   v_zero(y, n);
@@ -322,9 +334,9 @@ static int solve_admm(int n, const double *D, const double *d, const double *lb,
   return max_iter;
 }
 
-int nanoqsp_solve_box(int n, const double *D, const double *d, const double *lb,
-                      const double *ub, double *x,
-                      const NanoqspConfig *config) {
+int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
+                      const double *restrict lb, const double *restrict ub,
+                      double *restrict x, const NanoqspConfig *config) {
   if (n <= 0 || D == NULL || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
   }
@@ -332,7 +344,7 @@ int nanoqsp_solve_box(int n, const double *D, const double *d, const double *lb,
   NanoqspStrategy strategy = NANOQSP_STRATEGY_COORDINATE_DESCENT;
   int max_iterations = 1000;
   double tolerance = 1e-6;
-  double *ws = NULL;
+  double *restrict ws = NULL;
   int ws_size = 0;
 
   if (config != NULL) {
@@ -358,7 +370,7 @@ int nanoqsp_solve_box(int n, const double *D, const double *d, const double *lb,
   int needs_free = 0;
   if (required_ws > 0) {
     if (ws == NULL || ws_size < required_ws) {
-      ws = (double *)malloc(required_ws * sizeof(double));
+      ws = (double *restrict)malloc(required_ws * sizeof(double));
       if (!ws)
         return NANOQSP_ERR_OUT_OF_MEMORY;
       needs_free = 1;
@@ -393,20 +405,23 @@ int nanoqsp_solve_box(int n, const double *D, const double *d, const double *lb,
   return iters;
 }
 
-double nanoqsp_predict(int n, const double *x, const double *feature_vector) {
+double nanoqsp_predict(int n, const double *restrict x,
+                       const double *restrict feature_vector) {
   if (n <= 0 || x == NULL || feature_vector == NULL)
     return 0.0;
   return v_dot(x, feature_vector, n);
 }
 
-int nanoqsp_solve_least_squares(int m, int n, const double *A, const double *b,
-                                const double *lb, const double *ub, double *x,
+int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
+                                const double *restrict b,
+                                const double *restrict lb,
+                                const double *restrict ub, double *restrict x,
                                 const NanoqspConfig *config) {
   if (m <= 0 || n <= 0 || A == NULL || b == NULL || x == NULL)
     return NANOQSP_ERR_INVALID_ARG;
 
   NanoqspStrategy strategy = NANOQSP_STRATEGY_COORDINATE_DESCENT;
-  double *ws = NULL;
+  double *restrict ws = NULL;
   int ws_size = 0;
 
   if (config != NULL) {
@@ -426,16 +441,16 @@ int nanoqsp_solve_least_squares(int m, int n, const double *A, const double *b,
     required_box = 6 * n;
 
   int required_total = (n * n) + n + required_box;
-  double *D = NULL;
-  double *d = NULL;
+  double *restrict D = NULL;
+  double *restrict d = NULL;
   int needs_free = 0;
 
   if (ws != NULL && ws_size >= required_total) {
     D = ws;
     d = ws + (n * n);
   } else {
-    D = (double *)malloc(n * n * sizeof(double));
-    d = (double *)malloc(n * sizeof(double));
+    D = (double *restrict)malloc(n * n * sizeof(double));
+    d = (double *restrict)malloc(n * sizeof(double));
     if (!D || !d) {
       if (D)
         free(D);
