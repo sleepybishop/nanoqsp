@@ -24,13 +24,22 @@ void v_zero(double *restrict dest, int n) {
 }
 
 double v_dot(const double *restrict x, const double *restrict y, int n) {
-  __m128d acc = _mm_setzero_pd();
+  __m128d acc0 = _mm_setzero_pd();
+  __m128d acc1 = _mm_setzero_pd();
+  __m128d acc2 = _mm_setzero_pd();
+  __m128d acc3 = _mm_setzero_pd();
   int i = 0;
-  for (; i <= n - 2; i += 2) {
-    __m128d xi = _mm_loadu_pd(&x[i]);
-    __m128d yi = _mm_loadu_pd(&y[i]);
-    acc = _mm_add_pd(acc, _mm_mul_pd(xi, yi));
+  for (; i <= n - 8; i += 8) {
+    acc0 =
+        _mm_add_pd(acc0, _mm_mul_pd(_mm_loadu_pd(&x[i]), _mm_loadu_pd(&y[i])));
+    acc1 = _mm_add_pd(
+        acc1, _mm_mul_pd(_mm_loadu_pd(&x[i + 2]), _mm_loadu_pd(&y[i + 2])));
+    acc2 = _mm_add_pd(
+        acc2, _mm_mul_pd(_mm_loadu_pd(&x[i + 4]), _mm_loadu_pd(&y[i + 4])));
+    acc3 = _mm_add_pd(
+        acc3, _mm_mul_pd(_mm_loadu_pd(&x[i + 6]), _mm_loadu_pd(&y[i + 6])));
   }
+  __m128d acc = _mm_add_pd(_mm_add_pd(acc0, acc1), _mm_add_pd(acc2, acc3));
   double temp[2];
   _mm_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1];
@@ -41,14 +50,19 @@ double v_dot(const double *restrict x, const double *restrict y, int n) {
 }
 
 double v_norm1(const double *restrict x, int n) {
-  __m128d acc = _mm_setzero_pd();
+  __m128d acc0 = _mm_setzero_pd();
+  __m128d acc1 = _mm_setzero_pd();
+  __m128d acc2 = _mm_setzero_pd();
+  __m128d acc3 = _mm_setzero_pd();
   __m128d sign_bit = _mm_set1_pd(-0.0);
   int i = 0;
-  for (; i <= n - 2; i += 2) {
-    __m128d xi = _mm_loadu_pd(&x[i]);
-    __m128d abs_xi = _mm_andnot_pd(sign_bit, xi);
-    acc = _mm_add_pd(acc, abs_xi);
+  for (; i <= n - 8; i += 8) {
+    acc0 = _mm_add_pd(acc0, _mm_andnot_pd(sign_bit, _mm_loadu_pd(&x[i])));
+    acc1 = _mm_add_pd(acc1, _mm_andnot_pd(sign_bit, _mm_loadu_pd(&x[i + 2])));
+    acc2 = _mm_add_pd(acc2, _mm_andnot_pd(sign_bit, _mm_loadu_pd(&x[i + 4])));
+    acc3 = _mm_add_pd(acc3, _mm_andnot_pd(sign_bit, _mm_loadu_pd(&x[i + 6])));
   }
+  __m128d acc = _mm_add_pd(_mm_add_pd(acc0, acc1), _mm_add_pd(acc2, acc3));
   double temp[2];
   _mm_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1];

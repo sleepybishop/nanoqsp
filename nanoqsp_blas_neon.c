@@ -24,13 +24,18 @@ void v_zero(double *restrict dest, int n) {
 }
 
 double v_dot(const double *restrict x, const double *restrict y, int n) {
-  float64x2_t sum_vec = vdupq_n_f64(0.0);
+  float64x2_t sum0 = vdupq_n_f64(0.0);
+  float64x2_t sum1 = vdupq_n_f64(0.0);
+  float64x2_t sum2 = vdupq_n_f64(0.0);
+  float64x2_t sum3 = vdupq_n_f64(0.0);
   int i = 0;
-  for (; i <= n - 2; i += 2) {
-    float64x2_t xi = vld1q_f64(&x[i]);
-    float64x2_t yi = vld1q_f64(&y[i]);
-    sum_vec = vfmaq_f64(sum_vec, xi, yi);
+  for (; i <= n - 8; i += 8) {
+    sum0 = vfmaq_f64(sum0, vld1q_f64(&x[i]), vld1q_f64(&y[i]));
+    sum1 = vfmaq_f64(sum1, vld1q_f64(&x[i + 2]), vld1q_f64(&y[i + 2]));
+    sum2 = vfmaq_f64(sum2, vld1q_f64(&x[i + 4]), vld1q_f64(&y[i + 4]));
+    sum3 = vfmaq_f64(sum3, vld1q_f64(&x[i + 6]), vld1q_f64(&y[i + 6]));
   }
+  float64x2_t sum_vec = vaddq_f64(vaddq_f64(sum0, sum1), vaddq_f64(sum2, sum3));
   double sum = vgetq_lane_f64(sum_vec, 0) + vgetq_lane_f64(sum_vec, 1);
   for (; i < n; i++) {
     sum += x[i] * y[i];
@@ -39,12 +44,18 @@ double v_dot(const double *restrict x, const double *restrict y, int n) {
 }
 
 double v_norm1(const double *restrict x, int n) {
-  float64x2_t sum_vec = vdupq_n_f64(0.0);
+  float64x2_t sum0 = vdupq_n_f64(0.0);
+  float64x2_t sum1 = vdupq_n_f64(0.0);
+  float64x2_t sum2 = vdupq_n_f64(0.0);
+  float64x2_t sum3 = vdupq_n_f64(0.0);
   int i = 0;
-  for (; i <= n - 2; i += 2) {
-    float64x2_t xi = vld1q_f64(&x[i]);
-    sum_vec = vaddq_f64(sum_vec, vabsq_f64(xi));
+  for (; i <= n - 8; i += 8) {
+    sum0 = vaddq_f64(sum0, vabsq_f64(vld1q_f64(&x[i])));
+    sum1 = vaddq_f64(sum1, vabsq_f64(vld1q_f64(&x[i + 2])));
+    sum2 = vaddq_f64(sum2, vabsq_f64(vld1q_f64(&x[i + 4])));
+    sum3 = vaddq_f64(sum3, vabsq_f64(vld1q_f64(&x[i + 6])));
   }
+  float64x2_t sum_vec = vaddq_f64(vaddq_f64(sum0, sum1), vaddq_f64(sum2, sum3));
   double sum = vgetq_lane_f64(sum_vec, 0) + vgetq_lane_f64(sum_vec, 1);
   for (; i < n; i++) {
     sum += fabs(x[i]);
@@ -53,7 +64,8 @@ double v_norm1(const double *restrict x, int n) {
 }
 
 void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
-  if (alpha == 0.0) return;
+  if (alpha == 0.0)
+    return;
   float64x2_t a = vdupq_n_f64(alpha);
   int i = 0;
   for (; i <= n - 2; i += 2) {

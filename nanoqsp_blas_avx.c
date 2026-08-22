@@ -24,13 +24,23 @@ void v_zero(double *restrict dest, int n) {
 }
 
 double v_dot(const double *restrict x, const double *restrict y, int n) {
-  __m256d acc = _mm256_setzero_pd();
+  __m256d acc0 = _mm256_setzero_pd();
+  __m256d acc1 = _mm256_setzero_pd();
+  __m256d acc2 = _mm256_setzero_pd();
+  __m256d acc3 = _mm256_setzero_pd();
   int i = 0;
-  for (; i <= n - 4; i += 4) {
-    __m256d xi = _mm256_loadu_pd(&x[i]);
-    __m256d yi = _mm256_loadu_pd(&y[i]);
-    acc = _mm256_add_pd(acc, _mm256_mul_pd(xi, yi));
+  for (; i <= n - 16; i += 16) {
+    acc0 = _mm256_add_pd(
+        acc0, _mm256_mul_pd(_mm256_loadu_pd(&x[i]), _mm256_loadu_pd(&y[i])));
+    acc1 = _mm256_add_pd(acc1, _mm256_mul_pd(_mm256_loadu_pd(&x[i + 4]),
+                                             _mm256_loadu_pd(&y[i + 4])));
+    acc2 = _mm256_add_pd(acc2, _mm256_mul_pd(_mm256_loadu_pd(&x[i + 8]),
+                                             _mm256_loadu_pd(&y[i + 8])));
+    acc3 = _mm256_add_pd(acc3, _mm256_mul_pd(_mm256_loadu_pd(&x[i + 12]),
+                                             _mm256_loadu_pd(&y[i + 12])));
   }
+  __m256d acc =
+      _mm256_add_pd(_mm256_add_pd(acc0, acc1), _mm256_add_pd(acc2, acc3));
   double temp[4];
   _mm256_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1] + temp[2] + temp[3];
@@ -41,14 +51,24 @@ double v_dot(const double *restrict x, const double *restrict y, int n) {
 }
 
 double v_norm1(const double *restrict x, int n) {
-  __m256d acc = _mm256_setzero_pd();
+  __m256d acc0 = _mm256_setzero_pd();
+  __m256d acc1 = _mm256_setzero_pd();
+  __m256d acc2 = _mm256_setzero_pd();
+  __m256d acc3 = _mm256_setzero_pd();
   __m256d sign_bit = _mm256_set1_pd(-0.0);
   int i = 0;
-  for (; i <= n - 4; i += 4) {
-    __m256d xi = _mm256_loadu_pd(&x[i]);
-    __m256d abs_xi = _mm256_andnot_pd(sign_bit, xi);
-    acc = _mm256_add_pd(acc, abs_xi);
+  for (; i <= n - 16; i += 16) {
+    acc0 =
+        _mm256_add_pd(acc0, _mm256_andnot_pd(sign_bit, _mm256_loadu_pd(&x[i])));
+    acc1 = _mm256_add_pd(
+        acc1, _mm256_andnot_pd(sign_bit, _mm256_loadu_pd(&x[i + 4])));
+    acc2 = _mm256_add_pd(
+        acc2, _mm256_andnot_pd(sign_bit, _mm256_loadu_pd(&x[i + 8])));
+    acc3 = _mm256_add_pd(
+        acc3, _mm256_andnot_pd(sign_bit, _mm256_loadu_pd(&x[i + 12])));
   }
+  __m256d acc =
+      _mm256_add_pd(_mm256_add_pd(acc0, acc1), _mm256_add_pd(acc2, acc3));
   double temp[4];
   _mm256_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1] + temp[2] + temp[3];
