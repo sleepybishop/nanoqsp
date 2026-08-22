@@ -174,7 +174,7 @@ int test_cross_verify(int test_id) {
 
     NanoqspConfig config = {
         .strategy = (NanoqspStrategy)s,
-        .max_iterations = 5000,
+        .max_iterations = (type == 3) ? 100000 : 5000,
         .tolerance = 1e-6,
     };
 
@@ -383,6 +383,109 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     admm_config.strategy = NANOQSP_STRATEGY_ADMM;
     return nanoqsp_solve_affine_sparse(n, m, &D, d, &A, lb_x, ub_x, lb_A, ub_A,
                                        out_x, &admm_config);
+  } else if (test_id == 17) {
+    /* Infeasible dense SPG warm starts must be projected before KKT checks. */
+    double D[] = {1.0};
+    double d[] = {-2.0};
+    double lb[] = {0.0};
+    double ub[] = {1.0};
+    out_x[0] = -1.0;
+    config.strategy = NANOQSP_STRATEGY_SPECTRAL_GRADIENT;
+    return nanoqsp_solve_box(1, D, d, lb, ub, out_x, &config);
+  } else if (test_id == 18) {
+    /* Infeasible sparse SPG warm starts must be projected before KKT checks. */
+    double values[] = {1.0};
+    int col_indices[] = {0};
+    int row_ptr[] = {0, 1};
+    NanoqspCSR D = {1, 1, values, col_indices, row_ptr};
+    double d[] = {-2.0};
+    double lb[] = {0.0};
+    double ub[] = {1.0};
+    out_x[0] = -1.0;
+    config.strategy = NANOQSP_STRATEGY_SPECTRAL_GRADIENT;
+    return nanoqsp_solve_box_sparse(1, &D, d, lb, ub, out_x, &config);
+  } else if (test_id == 19) {
+    /* Iteration exhaustion must not be reported as success. */
+    double D[] = {1.0, 0.0, 0.0, 100.0};
+    double d[] = {1.0, 100.0};
+    out_x[0] = 0.0;
+    out_x[1] = 0.0;
+    config.strategy = NANOQSP_STRATEGY_PROJECTED_GRADIENT;
+    config.max_iterations = 1;
+    config.tolerance = 1e-12;
+    return nanoqsp_solve_box(2, D, d, NULL, NULL, out_x, &config);
+  } else if (test_id == 20) {
+    /* Malformed CSR input must return INVALID_ARG instead of crashing. */
+    int col_indices[] = {0};
+    int row_ptr[] = {0, 1};
+    NanoqspCSR D = {1, 1, NULL, col_indices, row_ptr};
+    double d[] = {0.0};
+    out_x[0] = 0.0;
+    return nanoqsp_solve_box_sparse(1, &D, d, NULL, NULL, out_x, &config);
+  } else if (test_id == 21) {
+    double D[] = {1.0};
+    double d[] = {0.0};
+    out_x[0] = 0.0;
+    return nanoqsp_solve_affine(1, -1, D, d, NULL, NULL, NULL, NULL, NULL,
+                                out_x, NULL);
+  } else if (test_id == 22) {
+    /* Dense affine output must be the projected z variable. */
+    double D[] = {1.0};
+    double d[] = {10.0};
+    double lb[] = {0.0};
+    double ub[] = {1.0};
+    out_x[0] = 0.0;
+    config.strategy = NANOQSP_STRATEGY_ADMM;
+    config.tolerance = 0.1;
+    return nanoqsp_solve_affine(1, 0, D, d, NULL, lb, ub, NULL, NULL, out_x,
+                                &config);
+  } else if (test_id == 23) {
+    double D[] = {1.0};
+    double d[] = {0.0};
+    double lb[] = {2.0};
+    double ub[] = {1.0};
+    out_x[0] = 0.0;
+    return nanoqsp_solve_box(1, D, d, lb, ub, out_x, &config);
+  } else if (test_id == 24) {
+    double D[] = {1.0};
+    double d[] = {0.0};
+    out_x[0] = 0.0;
+    config.strategy = NANOQSP_STRATEGY_PROJECTED_GRADIENT;
+    return nanoqsp_solve_affine(1, 0, D, d, NULL, NULL, NULL, NULL, NULL, out_x,
+                                &config);
+  } else if (test_id == 25) {
+    /* Sparse coordinate descent must not overwrite its diagonal during KKT. */
+    double values[] = {10000.0, 9999.0, 9999.0, 10000.0};
+    int col_indices[] = {0, 1, 0, 1};
+    int row_ptr[] = {0, 2, 4};
+    NanoqspCSR sparse_D = {2, 4, values, col_indices, row_ptr};
+    double d[] = {1.0, -1.0};
+    double lb[] = {-10.0, -10.0};
+    double ub[] = {10.0, 10.0};
+    double dense_x[] = {0.0, 0.0};
+    out_x[0] = 0.0;
+    out_x[1] = 0.0;
+    config.strategy = NANOQSP_STRATEGY_COORDINATE_DESCENT;
+    config.max_iterations = 10;
+    config.tolerance = 1e-3;
+    int dense_ret = nanoqsp_solve_box(2, values, d, lb, ub, dense_x, &config);
+    int sparse_ret =
+        nanoqsp_solve_box_sparse(2, &sparse_D, d, lb, ub, out_x, &config);
+    if (dense_ret != NANOQSP_ERR_MAX_ITERATIONS ||
+        sparse_ret != NANOQSP_ERR_MAX_ITERATIONS ||
+        fabs(dense_x[0] - out_x[0]) > 1e-12 ||
+        fabs(dense_x[1] - out_x[1]) > 1e-12)
+      return -10;
+    return 0;
+  } else if (test_id == 26) {
+    if (nanoqsp_workspace_size_box(10, NANOQSP_STRATEGY_ADMM) != 60 ||
+        nanoqsp_workspace_size_box_sparse(
+            10, NANOQSP_STRATEGY_COORDINATE_DESCENT) != 20 ||
+        nanoqsp_workspace_size_least_squares(
+            10, NANOQSP_STRATEGY_SPECTRAL_GRADIENT) != 140 ||
+        nanoqsp_workspace_size_affine(10, 3) != 79)
+      return -10;
+    return 0;
   }
   return -99;
 }

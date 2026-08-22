@@ -48,9 +48,10 @@ for my $s_idx (0..$#strategies) {
     {
         my $output = `./test_runner 4 $strat`;
         chomp($output);
-        if ($output =~ /RET:(\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
+        if ($output =~ /RET:(-?\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
             my ($ret, $x0, $x1) = ($1, $2, $3);
-            ok($ret >= 0, "$s_name - Test 4 handles singular matrix with regularization");
+            ok($ret >= 0 || $ret == -4,
+                "$s_name - Test 4 handles singular matrix without false success");
         } else {
             fail("$s_name - Test 4 output format mismatch");
         }
@@ -100,4 +101,3 @@ for my $s_idx (0..$#strategies) {
         fail("ADMM - Test 15 output format mismatch");
     }
 }
-

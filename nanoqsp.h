@@ -7,6 +7,7 @@ extern "C" {
 
 /* Standard error and status codes */
 typedef enum {
+  NANOQSP_ERR_MAX_ITERATIONS = -4,
   NANOQSP_ERR_OUT_OF_MEMORY = -3,
   NANOQSP_ERR_INVALID_STRATEGY = -2,
   NANOQSP_ERR_INVALID_ARG = -1,
@@ -47,6 +48,16 @@ typedef struct {
 } NanoqspCSR;
 
 /**
+ * Returns the minimum workspace size, measured in doubles, needed to keep the
+ * corresponding solve path allocation-free. A negative NanoqspStatus value is
+ * returned for invalid dimensions or strategies.
+ */
+int nanoqsp_workspace_size_box(int n, NanoqspStrategy strategy);
+int nanoqsp_workspace_size_box_sparse(int n, NanoqspStrategy strategy);
+int nanoqsp_workspace_size_least_squares(int n, NanoqspStrategy strategy);
+int nanoqsp_workspace_size_affine(int n, int m);
+
+/**
  * Solves the box-constrained quadratic programming (QP) problem:
  *   minimize    0.5 * x^T * D * x - d^T * x
  *   subject to  lb <= x_i <= ub    for all i
@@ -58,7 +69,8 @@ typedef struct {
  *   lb:          Lower bounds array (size n). If NULL, treated as -INFINITY
  *   ub:          Upper bounds array (size n). If NULL, treated as INFINITY
  *   x:           Input/Output vector (size n). Can be pre-initialized for a
- * warm start. config:      Configuration options (if NULL, defaults are used)
+ * warm start. It is projected into the bounds before solving.
+ *   config:      Configuration options (if NULL, defaults are used)
  *
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
@@ -77,7 +89,9 @@ int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
  *   D:           Sparse positive-definite matrix in CSR format
  *   d:           n-dimensional vector (size n)
  *   lb, ub:      Lower/Upper bounds array (size n). If NULL, treated as
- * -INFINITY x:           Input/Output vector (size n). Can be pre-initialized.
+ * -INFINITY
+ *   x:           Input/Output vector (size n). Can be pre-initialized and is
+ * projected into the bounds before solving.
  *   config:      Configuration options (if NULL, defaults are used)
  *
  * Returns:
@@ -134,7 +148,8 @@ double nanoqsp_predict(int n, const double *restrict x,
  *   lb_x, ub_x:  Bounds on x (size n). If NULL, treated as +/-INFINITY
  *   lb_A, ub_A:  Bounds on A*x (size m). If NULL, treated as +/-INFINITY
  *   x:           Input/Output vector (size n). Can be pre-initialized.
- *   config:      Configuration options. If NULL, defaults are used.
+ *   config:      Configuration options. Affine problems support ADMM only; if
+ *                config is non-NULL, strategy must be NANOQSP_STRATEGY_ADMM.
  *
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
@@ -160,7 +175,8 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
  *   lb_x, ub_x:  Bounds on x (size n). If NULL, treated as +/-INFINITY
  *   lb_A, ub_A:  Bounds on A*x (size m). If NULL, treated as +/-INFINITY
  *   x:           Input/Output vector (size n). Can be pre-initialized.
- *   config:      Configuration options. If NULL, defaults are used.
+ *   config:      Configuration options. Affine problems support ADMM only; if
+ *                config is non-NULL, strategy must be NANOQSP_STRATEGY_ADMM.
  *
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.

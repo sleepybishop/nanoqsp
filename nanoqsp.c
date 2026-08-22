@@ -4,12 +4,122 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#define NANOQSP_MAX_DOUBLES 268435455LL
+
 static inline double clamp(double val, double lb, double ub) {
   if (val < lb)
     return lb;
   if (val > ub)
     return ub;
   return val;
+}
+
+static int valid_strategy(NanoqspStrategy strategy) {
+  return strategy >= NANOQSP_STRATEGY_COORDINATE_DESCENT &&
+         strategy <= NANOQSP_STRATEGY_ADMM;
+}
+
+static int validate_bounds(int n, const double *restrict lb,
+                           const double *restrict ub) {
+  for (int i = 0; i < n; i++) {
+    double lower = lb ? lb[i] : -INFINITY;
+    double upper = ub ? ub[i] : INFINITY;
+    if (isnan(lower) || isnan(upper) || lower > upper)
+      return 0;
+  }
+  return 1;
+}
+
+static void project_bounds(int n, const double *restrict lb,
+                           const double *restrict ub, double *restrict x) {
+  for (int i = 0; i < n; i++) {
+    double lower = lb ? lb[i] : -INFINITY;
+    double upper = ub ? ub[i] : INFINITY;
+    x[i] = clamp(x[i], lower, upper);
+  }
+}
+
+static int validate_warm_start(int n, const double *restrict x) {
+  for (int i = 0; i < n; i++) {
+    if (isnan(x[i]))
+      return 0;
+  }
+  return 1;
+}
+
+static int validate_csr(const NanoqspCSR *matrix, int rows, int cols) {
+  if (matrix == NULL || rows < 0 || cols <= 0 || matrix->n != rows ||
+      matrix->nnz < 0 || matrix->row_ptr == NULL)
+    return 0;
+  if (matrix->row_ptr[0] != 0 || matrix->row_ptr[rows] != matrix->nnz)
+    return 0;
+  if (matrix->nnz > 0 &&
+      (matrix->values == NULL || matrix->col_indices == NULL))
+    return 0;
+  for (int i = 0; i < rows; i++) {
+    int start = matrix->row_ptr[i];
+    int end = matrix->row_ptr[i + 1];
+    if (start < 0 || end < start || end > matrix->nnz)
+      return 0;
+  }
+  for (int idx = 0; idx < matrix->nnz; idx++) {
+    if (matrix->col_indices[idx] < 0 || matrix->col_indices[idx] >= cols)
+      return 0;
+  }
+  return 1;
+}
+
+int nanoqsp_workspace_size_box(int n, NanoqspStrategy strategy) {
+  if (n <= 0 || !valid_strategy(strategy) || 6LL * n > NANOQSP_MAX_DOUBLES)
+    return NANOQSP_ERR_INVALID_ARG;
+  if (strategy == NANOQSP_STRATEGY_COORDINATE_DESCENT)
+    return 0;
+  if (strategy == NANOQSP_STRATEGY_PROJECTED_GRADIENT)
+    return n;
+  if (strategy == NANOQSP_STRATEGY_ACCELERATED_GRADIENT)
+    return 2 * n;
+  if (strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT)
+    return 3 * n;
+  return 6 * n;
+}
+
+int nanoqsp_workspace_size_box_sparse(int n, NanoqspStrategy strategy) {
+  if (n <= 0 || !valid_strategy(strategy) || 6LL * n > NANOQSP_MAX_DOUBLES)
+    return NANOQSP_ERR_INVALID_ARG;
+  if (strategy == NANOQSP_STRATEGY_COORDINATE_DESCENT ||
+      strategy == NANOQSP_STRATEGY_PROJECTED_GRADIENT)
+    return 2 * n;
+  if (strategy == NANOQSP_STRATEGY_ACCELERATED_GRADIENT ||
+      strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT)
+    return 3 * n;
+  return 6 * n;
+}
+
+int nanoqsp_workspace_size_least_squares(int n, NanoqspStrategy strategy) {
+  int box_size = nanoqsp_workspace_size_box(n, strategy);
+  long long total;
+  if (box_size < 0 || (long long)n * n > NANOQSP_MAX_DOUBLES)
+    return NANOQSP_ERR_INVALID_ARG;
+  total = (long long)n * n + n + box_size;
+  if (total > NANOQSP_MAX_DOUBLES)
+    return NANOQSP_ERR_INVALID_ARG;
+  return (int)total;
+}
+
+int nanoqsp_workspace_size_affine(int n, int m) {
+  long long total;
+  if (n <= 0 || m < 0)
+    return NANOQSP_ERR_INVALID_ARG;
+  total = 7LL * n + 3LL * m;
+  if (total > NANOQSP_MAX_DOUBLES)
+    return NANOQSP_ERR_INVALID_ARG;
+  return (int)total;
+}
+
+static void dense_sym_mat_vec(int n, const double *restrict D,
+                              const double *restrict x, double *restrict y) {
+  for (int i = 0; i < n; i++)
+    y[i] = v_dot(&D[i * n], x, n);
 }
 
 static double get_matrix_norm_inf(int n, const double *restrict D) {
@@ -82,7 +192,7 @@ static int solve_coordinate_descent(int n, const double *restrict D,
       }
     }
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 /* Strategy 2: Projected Gradient Descent */
@@ -99,10 +209,7 @@ static int solve_projected_gradient(int n, const double *restrict D,
 
   int iter;
   for (iter = 0; iter < max_iter; iter++) {
-    v_zero(next_x, n);
-    for (int j = 0; j < n; j++) {
-      v_axpy(next_x, &D[j * n], x[j], n);
-    }
+    dense_sym_mat_vec(n, D, x, next_x);
 
     double max_kkt = 0.0;
     double d_max = 0.0;
@@ -142,7 +249,7 @@ static int solve_projected_gradient(int n, const double *restrict D,
     if (max_kkt < tol * scale)
       return iter + 1;
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 /* Strategy 3: Nesterov Accelerated Projected Gradient Descent with Adaptive
@@ -166,10 +273,7 @@ static int solve_accelerated_gradient(int n, const double *restrict D,
   for (iter = 0; iter < max_iter; iter++) {
     double max_diff = 0.0;
 
-    v_zero(next_x, n);
-    for (int j = 0; j < n; j++) {
-      v_axpy(next_x, &D[j * n], y[j], n);
-    }
+    dense_sym_mat_vec(n, D, y, next_x);
 
     for (int i = 0; i < n; i++) {
       double grad_i = next_x[i] - d[i];
@@ -184,10 +288,7 @@ static int solve_accelerated_gradient(int n, const double *restrict D,
     }
 
     if (max_diff < tol) {
-      v_zero(y, n);
-      for (int j = 0; j < n; j++) {
-        v_axpy(y, &D[j * n], next_x[j], n);
-      }
+      dense_sym_mat_vec(n, D, next_x, y);
       double max_kkt = 0.0;
       double d_max = 0.0;
       double dx_max = 0.0;
@@ -244,7 +345,7 @@ static int solve_accelerated_gradient(int n, const double *restrict D,
       t = t_next;
     }
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 /* Strategy 4: Spectral Projected Gradient (SPG) */
@@ -259,10 +360,7 @@ static int solve_spectral_gradient(int n, const double *restrict D,
   double *restrict grad = ws + n;
   double *restrict next_grad = ws + 2 * n;
 
-  v_zero(grad, n);
-  for (int j = 0; j < n; j++) {
-    v_axpy(grad, &D[j * n], x[j], n);
-  }
+  dense_sym_mat_vec(n, D, x, grad);
   for (int i = 0; i < n; i++) {
     grad[i] -= d[i];
   }
@@ -307,10 +405,7 @@ static int solve_spectral_gradient(int n, const double *restrict D,
       next_x[i] = clamp(x[i] - alpha * grad[i], lower, upper);
     }
 
-    v_zero(next_grad, n);
-    for (int j = 0; j < n; j++) {
-      v_axpy(next_grad, &D[j * n], next_x[j], n);
-    }
+    dense_sym_mat_vec(n, D, next_x, next_grad);
     for (int i = 0; i < n; i++) {
       next_grad[i] -= d[i];
     }
@@ -337,7 +432,7 @@ static int solve_spectral_gradient(int n, const double *restrict D,
     v_copy(x, next_x, n);
     v_copy(grad, next_grad, n);
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 /* Strategy 5: Nano ADMM */
@@ -345,10 +440,7 @@ static void cg_solve(int n, const double *restrict D, double rho,
                      const double *restrict c, double *restrict x,
                      double *restrict r, double *restrict p,
                      double *restrict Ap) {
-  v_zero(r, n);
-  for (int j = 0; j < n; j++) {
-    v_axpy(r, &D[j * n], x[j], n);
-  }
+  dense_sym_mat_vec(n, D, x, r);
   for (int i = 0; i < n; i++) {
     r[i] = c[i] - (r[i] + rho * x[i]);
     p[i] = r[i];
@@ -360,10 +452,7 @@ static void cg_solve(int n, const double *restrict D, double rho,
       break;
 
     double pAp = 0.0;
-    v_zero(Ap, n);
-    for (int j = 0; j < n; j++) {
-      v_axpy(Ap, &D[j * n], p[j], n);
-    }
+    dense_sym_mat_vec(n, D, p, Ap);
     for (int i = 0; i < n; i++) {
       Ap[i] += rho * p[i];
       pAp += p[i] * Ap[i];
@@ -463,15 +552,16 @@ static int solve_admm(int n, const double *restrict D, const double *restrict d,
     }
   }
   v_copy(x, z, n);
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
                       const double *restrict lb, const double *restrict ub,
                       double *restrict x, const NanoqspConfig *config) {
-  if ((long long)n * n > 268435455LL)
+  if ((long long)n * n > NANOQSP_MAX_DOUBLES)
     return NANOQSP_ERR_INVALID_ARG;
-  if (n <= 0 || D == NULL || d == NULL || x == NULL) {
+  if (n <= 0 || D == NULL || d == NULL || x == NULL ||
+      !validate_bounds(n, lb, ub) || !validate_warm_start(n, x)) {
     return NANOQSP_ERR_INVALID_ARG;
   }
 
@@ -491,25 +581,22 @@ int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
     ws_size = config->workspace_size;
   }
 
-  int required_ws = 0;
-  if (strategy == NANOQSP_STRATEGY_PROJECTED_GRADIENT)
-    required_ws = n;
-  else if (strategy == NANOQSP_STRATEGY_ACCELERATED_GRADIENT)
-    required_ws = 2 * n;
-  else if (strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT)
-    required_ws = 3 * n;
-  else if (strategy == NANOQSP_STRATEGY_ADMM)
-    required_ws = 6 * n;
+  int required_ws = nanoqsp_workspace_size_box(n, strategy);
+  if (required_ws < 0)
+    return valid_strategy(strategy) ? required_ws
+                                    : NANOQSP_ERR_INVALID_STRATEGY;
 
   int needs_free = 0;
   if (required_ws > 0) {
     if (ws == NULL || ws_size < required_ws) {
-      ws = (double *restrict)malloc(required_ws * sizeof(double));
+      ws = (double *restrict)malloc((size_t)required_ws * sizeof(double));
       if (!ws)
         return NANOQSP_ERR_OUT_OF_MEMORY;
       needs_free = 1;
     }
   }
+
+  project_bounds(n, lb, ub, x);
 
   int iters = NANOQSP_ERR_INVALID_STRATEGY;
   switch (strategy) {
@@ -551,9 +638,11 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
                                 const double *restrict lb,
                                 const double *restrict ub, double *restrict x,
                                 const NanoqspConfig *config) {
-  if ((long long)m * n > 268435455LL || (long long)n * n > 268435455LL)
+  if ((long long)m * n > NANOQSP_MAX_DOUBLES ||
+      (long long)n * n > NANOQSP_MAX_DOUBLES)
     return NANOQSP_ERR_INVALID_ARG;
-  if (m <= 0 || n <= 0 || A == NULL || b == NULL || x == NULL)
+  if (m <= 0 || n <= 0 || A == NULL || b == NULL || x == NULL ||
+      !validate_bounds(n, lb, ub) || !validate_warm_start(n, x))
     return NANOQSP_ERR_INVALID_ARG;
 
   NanoqspStrategy strategy = NANOQSP_STRATEGY_COORDINATE_DESCENT;
@@ -566,17 +655,10 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
     ws_size = config->workspace_size;
   }
 
-  int required_box = 0;
-  if (strategy == NANOQSP_STRATEGY_PROJECTED_GRADIENT)
-    required_box = n;
-  else if (strategy == NANOQSP_STRATEGY_ACCELERATED_GRADIENT)
-    required_box = 2 * n;
-  else if (strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT)
-    required_box = 3 * n;
-  else if (strategy == NANOQSP_STRATEGY_ADMM)
-    required_box = 6 * n;
-
-  int required_total = (n * n) + n + required_box;
+  int required_total = nanoqsp_workspace_size_least_squares(n, strategy);
+  if (required_total < 0)
+    return valid_strategy(strategy) ? required_total
+                                    : NANOQSP_ERR_INVALID_STRATEGY;
   double *restrict D = NULL;
   double *restrict d = NULL;
   int needs_free = 0;
@@ -585,8 +667,8 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
     D = ws;
     d = ws + (n * n);
   } else {
-    D = (double *restrict)malloc(n * n * sizeof(double));
-    d = (double *restrict)malloc(n * sizeof(double));
+    D = (double *restrict)malloc((size_t)n * (size_t)n * sizeof(double));
+    d = (double *restrict)malloc((size_t)n * sizeof(double));
     if (!D || !d) {
       if (D)
         free(D);
@@ -727,7 +809,7 @@ static int solve_coordinate_descent_sparse(int n, const NanoqspCSR *D,
       double max_kkt = 0.0;
       double d_max = 0.0;
       double dx_max = 0.0;
-      double *restrict g_temp = ws;
+      double *restrict g_temp = ws + n;
       sparse_mat_vec(D, x, g_temp);
       for (int i = 0; i < n; i++) {
         double grad_i = g_temp[i] - d[i];
@@ -759,7 +841,7 @@ static int solve_coordinate_descent_sparse(int n, const NanoqspCSR *D,
       }
     }
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 static int solve_projected_gradient_sparse(int n, const NanoqspCSR *D,
@@ -817,7 +899,7 @@ static int solve_projected_gradient_sparse(int n, const NanoqspCSR *D,
       return iter + 1;
     }
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 static int solve_accelerated_gradient_sparse(int n, const NanoqspCSR *D,
@@ -912,7 +994,7 @@ static int solve_accelerated_gradient_sparse(int n, const NanoqspCSR *D,
       t = t_next;
     }
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 static int solve_spectral_gradient_sparse(int n, const NanoqspCSR *D,
@@ -1000,7 +1082,7 @@ static int solve_spectral_gradient_sparse(int n, const NanoqspCSR *D,
       grad[i] = next_grad[i];
     }
   }
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 static void cg_solve_sparse(int n, const NanoqspCSR *D, double rho,
@@ -1129,7 +1211,7 @@ static int solve_admm_sparse(int n, const NanoqspCSR *D,
   }
   for (int i = 0; i < n; i++)
     x[i] = z[i];
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
@@ -1137,9 +1219,10 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
                              const double *restrict lb,
                              const double *restrict ub, double *restrict x,
                              const NanoqspConfig *config) {
-  if (6LL * n > 268435455LL)
+  if (6LL * n > NANOQSP_MAX_DOUBLES)
     return NANOQSP_ERR_INVALID_ARG;
-  if (n <= 0 || D == NULL || D->n != n || d == NULL || x == NULL) {
+  if (n <= 0 || d == NULL || x == NULL || !validate_csr(D, n, n) ||
+      !validate_bounds(n, lb, ub) || !validate_warm_start(n, x)) {
     return NANOQSP_ERR_INVALID_ARG;
   }
 
@@ -1159,27 +1242,22 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
     ws_size = config->workspace_size;
   }
 
-  int required_ws = 0;
-  if (strategy == NANOQSP_STRATEGY_COORDINATE_DESCENT)
-    required_ws = n;
-  else if (strategy == NANOQSP_STRATEGY_PROJECTED_GRADIENT)
-    required_ws = 2 * n;
-  else if (strategy == NANOQSP_STRATEGY_ACCELERATED_GRADIENT)
-    required_ws = 3 * n;
-  else if (strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT)
-    required_ws = 3 * n;
-  else if (strategy == NANOQSP_STRATEGY_ADMM)
-    required_ws = 6 * n;
+  int required_ws = nanoqsp_workspace_size_box_sparse(n, strategy);
+  if (required_ws < 0)
+    return valid_strategy(strategy) ? required_ws
+                                    : NANOQSP_ERR_INVALID_STRATEGY;
 
   int needs_free = 0;
   if (required_ws > 0) {
     if (ws == NULL || ws_size < required_ws) {
-      ws = (double *restrict)malloc(required_ws * sizeof(double));
+      ws = (double *restrict)malloc((size_t)required_ws * sizeof(double));
       if (!ws)
         return NANOQSP_ERR_OUT_OF_MEMORY;
       needs_free = 1;
     }
   }
+
+  project_bounds(n, lb, ub, x);
 
   int iters = NANOQSP_ERR_INVALID_STRATEGY;
   switch (strategy) {
@@ -1238,10 +1316,7 @@ static void cg_solve_affine(int n, int m, const double *restrict D,
                             double *restrict Ap, double *restrict tmp_n,
                             double *restrict tmp_m) {
   /* Compute initial residual r = c - (D*x + rho*(x + A^T*(A*x))) */
-  v_zero(r, n);
-  for (int j = 0; j < n; j++) {
-    v_axpy(r, &D[j * n], x[j], n);
-  }
+  dense_sym_mat_vec(n, D, x, r);
 
   if (m > 0 && A != NULL) {
     mat_vec_dense(m, n, A, x, tmp_m);
@@ -1263,10 +1338,7 @@ static void cg_solve_affine(int n, int m, const double *restrict D,
       break;
 
     double pAp = 0.0;
-    v_zero(Ap, n);
-    for (int j = 0; j < n; j++) {
-      v_axpy(Ap, &D[j * n], p[j], n);
-    }
+    dense_sym_mat_vec(n, D, p, Ap);
 
     if (m > 0 && A != NULL) {
       mat_vec_dense(m, n, A, p, tmp_m);
@@ -1439,10 +1511,12 @@ static int solve_admm_affine(int n, int m, const double *restrict D,
                              : (d_max > dx_max ? d_max : dx_max));
 
     if (max_diff < tol * dual_scale && prim_res < tol * prim_scale) {
+      v_copy(x, z, n);
       return iter + 1;
     }
   }
-  return max_iter;
+  v_copy(x, z, n);
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 int nanoqsp_solve_affine(int n, int m, const double *restrict D,
@@ -1452,12 +1526,13 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
                          const double *restrict lb_A,
                          const double *restrict ub_A, double *restrict x,
                          const NanoqspConfig *config) {
-  if ((long long)n * n > 268435455LL || (long long)m * n > 268435455LL)
-    return NANOQSP_ERR_INVALID_ARG;
-  if (n <= 0 || D == NULL || d == NULL || x == NULL) {
+  if (n <= 0 || m < 0 || D == NULL || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
   }
-  if (m > 0 && A == NULL) {
+  if ((long long)n * n > NANOQSP_MAX_DOUBLES ||
+      (long long)m * n > NANOQSP_MAX_DOUBLES || (m > 0 && A == NULL) ||
+      !validate_bounds(n, lb_x, ub_x) || !validate_bounds(m, lb_A, ub_A) ||
+      !validate_warm_start(n, x)) {
     return NANOQSP_ERR_INVALID_ARG;
   }
 
@@ -1467,6 +1542,8 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
   int ws_size = 0;
 
   if (config != NULL) {
+    if (config->strategy != NANOQSP_STRATEGY_ADMM)
+      return NANOQSP_ERR_INVALID_STRATEGY;
     if (config->max_iterations > 0)
       max_iterations = config->max_iterations;
     if (config->tolerance > 0.0)
@@ -1475,14 +1552,19 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
     ws_size = config->workspace_size;
   }
 
-  int required_ws = 7 * n + 3 * m;
+  int required_ws = nanoqsp_workspace_size_affine(n, m);
+  if (required_ws < 0)
+    return required_ws;
+
   int needs_free = 0;
   if (ws == NULL || ws_size < required_ws) {
-    ws = (double *restrict)malloc(required_ws * sizeof(double));
+    ws = (double *restrict)malloc((size_t)required_ws * sizeof(double));
     if (!ws)
       return NANOQSP_ERR_OUT_OF_MEMORY;
     needs_free = 1;
   }
+
+  project_bounds(n, lb_x, ub_x, x);
 
   int iters = solve_admm_affine(n, m, D, d, A, lb_x, ub_x, lb_A, ub_A, x,
                                 max_iterations, tolerance, ws);
@@ -1513,7 +1595,6 @@ static void cg_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
                                    double *restrict r, double *restrict p,
                                    double *restrict Ap, double *restrict tmp_n,
                                    double *restrict tmp_m) {
-  v_zero(r, n);
   sparse_mat_vec(D, x, r);
 
   if (m > 0 && A != NULL) {
@@ -1536,7 +1617,6 @@ static void cg_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
       break;
 
     double pAp = 0.0;
-    v_zero(Ap, n);
     sparse_mat_vec(D, p, Ap);
 
     if (m > 0 && A != NULL) {
@@ -1716,7 +1796,7 @@ static int solve_admm_affine_sparse(
   }
   for (int i = 0; i < n; i++)
     x[i] = z[i];
-  return max_iter;
+  return NANOQSP_ERR_MAX_ITERATIONS;
 }
 
 int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
@@ -1726,12 +1806,12 @@ int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
                                 const double *restrict lb_A,
                                 const double *restrict ub_A, double *restrict x,
                                 const NanoqspConfig *config) {
-  if (7LL * n + 3LL * m > 268435455LL)
-    return NANOQSP_ERR_INVALID_ARG;
-  if (n <= 0 || D == NULL || D->n != n || d == NULL || x == NULL) {
+  if (n <= 0 || m < 0 || d == NULL || x == NULL) {
     return NANOQSP_ERR_INVALID_ARG;
   }
-  if (m > 0 && (A == NULL || A->n != m)) {
+  if (7LL * n + 3LL * m > NANOQSP_MAX_DOUBLES || !validate_csr(D, n, n) ||
+      (m > 0 && !validate_csr(A, m, n)) || !validate_bounds(n, lb_x, ub_x) ||
+      !validate_bounds(m, lb_A, ub_A) || !validate_warm_start(n, x)) {
     return NANOQSP_ERR_INVALID_ARG;
   }
 
@@ -1741,6 +1821,8 @@ int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
   int ws_size = 0;
 
   if (config != NULL) {
+    if (config->strategy != NANOQSP_STRATEGY_ADMM)
+      return NANOQSP_ERR_INVALID_STRATEGY;
     if (config->max_iterations > 0)
       max_iterations = config->max_iterations;
     if (config->tolerance > 0.0)
@@ -1749,14 +1831,19 @@ int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
     ws_size = config->workspace_size;
   }
 
-  int required_ws = 7 * n + 3 * m;
+  int required_ws = nanoqsp_workspace_size_affine(n, m);
+  if (required_ws < 0)
+    return required_ws;
+
   int needs_free = 0;
   if (ws == NULL || ws_size < required_ws) {
-    ws = (double *restrict)malloc(required_ws * sizeof(double));
+    ws = (double *restrict)malloc((size_t)required_ws * sizeof(double));
     if (!ws)
       return NANOQSP_ERR_OUT_OF_MEMORY;
     needs_free = 1;
   }
+
+  project_bounds(n, lb_x, ub_x, x);
 
   int iters = solve_admm_affine_sparse(n, m, D, d, A, lb_x, ub_x, lb_A, ub_A, x,
                                        max_iterations, tolerance, ws);
