@@ -262,7 +262,10 @@ check_kkt_from_Dx(int n, const double *restrict Dx, const double *restrict d,
     double lower = lb ? lb[i] : -INFINITY;
     double upper = ub ? ub[i] : INFINITY;
     double viol = 0.0;
-    if (x[i] <= lower) {
+    if (lower == upper) {
+      /* fixed coordinate has no feasible descent direction */
+      viol = 0.0;
+    } else if (x[i] <= lower) {
       if (grad_i < 0.0)
         viol = -grad_i;
     } else if (x[i] >= upper) {
@@ -296,7 +299,7 @@ static int solve_coordinate_descent_dense(int n, const double *restrict D,
       double D_ii = D[i * n + i];
       double sum = v_dot(&D[i * n], x, n) - D_ii * x[i];
       double old_val = x[i];
-      if (fabs(D_ii) > 1e-12) {
+      if (D_ii > 0.0) {
         double lower = lb ? lb[i] : -INFINITY;
         double upper = ub ? ub[i] : INFINITY;
         x[i] = clamp((d[i] - sum) / D_ii, lower, upper);
@@ -323,7 +326,9 @@ static int solve_coordinate_descent_dense(int n, const double *restrict D,
         double lower = lb ? lb[i] : -INFINITY;
         double upper = ub ? ub[i] : INFINITY;
         double viol = 0.0;
-        if (x[i] <= lower) {
+        if (lower == upper) {
+          viol = 0.0;
+        } else if (x[i] <= lower) {
           if (grad_i < 0.0)
             viol = -grad_i;
         } else if (x[i] >= upper) {
@@ -385,7 +390,7 @@ static int solve_coordinate_descent_sparse(int n, const NanoqspCSR *D,
       }
       double old_val = x[i];
       double D_ii = diag[i];
-      if (fabs(D_ii) > 1e-12) {
+      if (D_ii > 0.0) {
         double lower = lb ? lb[i] : -INFINITY;
         double upper = ub ? ub[i] : INFINITY;
         x[i] = clamp((d[i] - sum) / D_ii, lower, upper);
@@ -417,7 +422,7 @@ static int solve_projected_gradient(int n, const double *restrict D_dense,
                                     double *restrict x, int max_iter,
                                     double tol, double *restrict ws) {
   double norm_inf = eval_D_norm_inf(n, D_dense, D_sparse);
-  double alpha = (norm_inf > 1e-12) ? (1.0 / norm_inf) : 0.1;
+  double matrix_scale = norm_inf > 0.0 ? norm_inf : 10.0;
   double d_max = get_vec_norm_inf(n, d);
   double *restrict dx = ws;
 
@@ -429,7 +434,7 @@ static int solve_projected_gradient(int n, const double *restrict D_dense,
     for (int i = 0; i < n; i++) {
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
-      x[i] = clamp(x[i] - alpha * (dx[i] - d[i]), lower, upper);
+      x[i] = clamp(x[i] - (dx[i] - d[i]) / matrix_scale, lower, upper);
     }
   }
 
@@ -448,7 +453,7 @@ static int solve_accelerated_gradient(int n, const double *restrict D_dense,
                                       double *restrict x, int max_iter,
                                       double tol, double *restrict ws) {
   double norm_inf = eval_D_norm_inf(n, D_dense, D_sparse);
-  double alpha = (norm_inf > 1e-12) ? (1.0 / norm_inf) : 0.1;
+  double matrix_scale = norm_inf > 0.0 ? norm_inf : 10.0;
   double d_max = get_vec_norm_inf(n, d);
 
   double *restrict y = ws_take(&ws, n);
@@ -467,7 +472,7 @@ static int solve_accelerated_gradient(int n, const double *restrict D_dense,
       double grad_i = next_x[i] - d[i];
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
-      next_x[i] = clamp(y[i] - alpha * grad_i, lower, upper);
+      next_x[i] = clamp(y[i] - grad_i / matrix_scale, lower, upper);
 
       double diff = fabs(next_x[i] - x[i]);
       if (diff > max_diff)
@@ -517,7 +522,9 @@ static int solve_spectral_gradient(int n, const double *restrict D_dense,
                                    double *restrict x, int max_iter, double tol,
                                    double *restrict ws) {
   double norm_inf = eval_D_norm_inf(n, D_dense, D_sparse);
-  double alpha = (norm_inf > 1e-12) ? (1.0 / norm_inf) : 0.01;
+  double matrix_scale = norm_inf > 0.0 ? norm_inf : 1.0;
+  /* store step relative to matrix_scale to avoid reciprocal overflow */
+  double alpha = 1.0;
   double d_max = get_vec_norm_inf(n, d);
   double *restrict next_x = ws_take(&ws, n);
   double *restrict dx = ws_take(&ws, n);
@@ -529,37 +536,63 @@ static int solve_spectral_gradient(int n, const double *restrict D_dense,
     if (check_kkt_from_Dx(n, dx, d, lb, ub, x, d_max, tol))
       return iter;
 
+    double direction_max = 0.0;
     for (int i = 0; i < n; i++) {
       double lower = lb ? lb[i] : -INFINITY;
       double upper = ub ? ub[i] : INFINITY;
-      next_x[i] = clamp(x[i] - alpha * (dx[i] - d[i]), lower, upper);
+      double gradient = (dx[i] - d[i]) / matrix_scale;
+      next_x[i] = clamp(x[i] - alpha * gradient, lower, upper) - x[i];
+      double magnitude = fabs(next_x[i]);
+      if (magnitude > direction_max)
+        direction_max = magnitude;
     }
 
+    if (!(direction_max > 0.0) || !isfinite(direction_max))
+      return NANOQSP_ERR_MAX_ITERATIONS;
+
+    /* normalize direction q before forming curvature to avoid BB underflow */
+    for (int i = 0; i < n; i++)
+      next_x[i] /= direction_max;
     eval_D_vec(n, D_dense, D_sparse, next_x, next_dx);
 
-    double s_dot_s = 0.0;
-    double s_dot_y = 0.0;
+    double q_dot_q = 0.0;
+    double curvature = 0.0;
+    double slope = 0.0;
     for (int i = 0; i < n; i++) {
-      double s_i = next_x[i] - x[i];
-      double y_i = next_dx[i] - dx[i];
-
-      s_dot_s += s_i * s_i;
-      s_dot_y += s_i * y_i;
+      double q_i = next_x[i];
+      q_dot_q += q_i * q_i;
+      curvature += q_i * (next_dx[i] / matrix_scale);
+      slope += q_i * ((dx[i] - d[i]) / matrix_scale);
     }
 
-    if (s_dot_y > 1e-12) {
-      double val = s_dot_s / s_dot_y;
-      if (val < 1e-10)
-        val = 1e-10;
-      if (val > 1e10)
-        val = 1e10;
-      alpha = val;
+    /* minimize quadratic along feasible segment to prevent BB cycling */
+    double length = direction_max;
+    if (curvature > 0.0) {
+      double minimizer = -slope / curvature;
+      if (minimizer < length)
+        length = minimizer;
+    }
+    if (!(length > 0.0))
+      return NANOQSP_ERR_MAX_ITERATIONS;
+
+    for (int i = 0; i < n; i++) {
+      double lower = lb ? lb[i] : -INFINITY;
+      double upper = ub ? ub[i] : INFINITY;
+      /* recreate full projected step exactly, including active bounds */
+      double candidate = length == direction_max
+                             ? x[i] - alpha * ((dx[i] - d[i]) / matrix_scale)
+                             : x[i] + length * next_x[i];
+      x[i] = clamp(candidate, lower, upper);
     }
 
-    v_copy(x, next_x, n);
-    double *restrict tmp_dx = dx;
-    dx = next_dx;
-    next_dx = tmp_dx;
+    /* BB1 ratio q^T q / q^T D q relative to matrix_scale */
+    double spectral_alpha = q_dot_q / curvature;
+    if (spectral_alpha > 0.0 && isfinite(spectral_alpha)) {
+      alpha = spectral_alpha < 1e12 ? spectral_alpha : 1e12;
+    } else {
+      alpha = 1.0;
+    }
+    eval_D_vec(n, D_dense, D_sparse, x, dx);
   }
 
   if (check_kkt_from_Dx(n, dx, d, lb, ub, x, d_max, tol))
@@ -569,28 +602,25 @@ static int solve_spectral_gradient(int n, const double *restrict D_dense,
 
 /* strategy 5: unified ADMM for box and general affine constraints */
 
-static void cg_solve_unified(int n, int m, const double *restrict D_dense,
-                             const NanoqspCSR *D_sparse,
-                             const double *restrict A_dense,
-                             const NanoqspCSR *A_sparse, double rho,
-                             double r_tol_sq, const double *restrict c,
-                             double *restrict x, double *restrict r,
-                             double *restrict p, double *restrict Ap,
-                             double *restrict tmp_n, double *restrict tmp_m) {
+static void cg_solve_unified(
+    int n, int m, const double *restrict D_dense, const NanoqspCSR *D_sparse,
+    const double *restrict A_dense, const NanoqspCSR *A_sparse, double rho,
+    double affine_rho, double r_tol_sq, const double *restrict d,
+    const double *restrict z, const double *restrict y, double *restrict x,
+    double *restrict r, double *restrict p, double *restrict Ap,
+    double *restrict tmp_n, double *restrict tmp_m) {
   int has_A = (m > 0 && (A_dense != NULL || A_sparse != NULL));
 
+  /* form residual from constraint differences before multiplying by A^T */
   eval_D_vec(n, D_dense, D_sparse, x, r);
-
+  for (int i = 0; i < n; i++)
+    r[i] = d[i] - r[i] + rho * ((z[i] - x[i]) - y[i]);
   if (has_A) {
     eval_A_vec(m, n, A_dense, A_sparse, x, tmp_m);
+    for (int i = 0; i < m; i++)
+      tmp_m[i] = (z[n + i] - tmp_m[i]) - y[n + i];
     eval_AT_vec(m, n, A_dense, A_sparse, tmp_m, tmp_n);
-    for (int i = 0; i < n; i++) {
-      r[i] = c[i] - (r[i] + rho * (x[i] + tmp_n[i]));
-    }
-  } else {
-    for (int i = 0; i < n; i++) {
-      r[i] = c[i] - (r[i] + rho * x[i]);
-    }
+    v_axpy(r, tmp_n, affine_rho, n);
   }
 
   v_copy(p, r, n);
@@ -600,27 +630,29 @@ static void cg_solve_unified(int n, int m, const double *restrict D_dense,
     if (r_sq <= r_tol_sq)
       break;
 
-    double pAp = 0.0;
     eval_D_vec(n, D_dense, D_sparse, p, Ap);
+    /* separate positive quadratic forms avoid cancellation in p^T(A^T A)p */
+    double pAp = v_dot(p, Ap, n) + rho * v_dot(p, p, n);
 
     if (has_A) {
       eval_A_vec(m, n, A_dense, A_sparse, p, tmp_m);
+      pAp += affine_rho * v_dot(tmp_m, tmp_m, m);
       eval_AT_vec(m, n, A_dense, A_sparse, tmp_m, tmp_n);
       for (int i = 0; i < n; i++) {
-        Ap[i] += rho * (p[i] + tmp_n[i]);
-        pAp += p[i] * Ap[i];
+        Ap[i] += rho * p[i] + affine_rho * tmp_n[i];
       }
     } else {
       for (int i = 0; i < n; i++) {
         Ap[i] += rho * p[i];
-        pAp += p[i] * Ap[i];
       }
     }
 
-    if (pAp < 1e-20)
+    if (!(pAp > 0.0) || !isfinite(pAp) || !isfinite(r_sq))
       break;
 
     double alpha = r_sq / pAp;
+    if (!isfinite(alpha))
+      break;
     v_axpy(x, p, alpha, n);
     v_axpy(r, Ap, -alpha, n);
 
@@ -642,14 +674,34 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
                    double *restrict x, int max_iter, double tol,
                    double *restrict ws) {
   double rho = 1.0;
+  double affine_weight = 1.0;
   int has_A = (m > 0 && (A_dense != NULL || A_sparse != NULL));
+  if (has_A) {
+    /* weight affine penalty independently of box penalty */
+    const double *values = A_dense ? A_dense : A_sparse->values;
+    int count = A_dense ? m * n : A_sparse->nnz;
+    double scale = 1.0;
+    double sum_squares = 1.0;
+    for (int i = 0; i < count; i++) {
+      double value = fabs(values[i]);
+      if (value > scale) {
+        double ratio = scale / value;
+        sum_squares = 1.0 + sum_squares * ratio * ratio;
+        scale = value;
+      } else {
+        double ratio = value / scale;
+        sum_squares += ratio * ratio;
+      }
+    }
+    double weight = ((1.0 / scale) / scale) / sum_squares;
+    if (weight > 0.0 && isfinite(weight))
+      affine_weight = weight;
+  }
   double d_max = get_vec_norm_inf(n, d);
   double cg_tol = 1e-2 * tol * (1.0 + d_max);
   double cg_tol_sq = cg_tol * cg_tol;
   if (cg_tol_sq > 1e-16)
     cg_tol_sq = 1e-16;
-  if (cg_tol_sq < 1e-24)
-    cg_tol_sq = 1e-24;
 
   double *restrict z = ws_take(&ws, n + m);
   double *restrict y = ws_take(&ws, n + m);
@@ -658,7 +710,7 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
   double *restrict p = ws_take(&ws, n);
   double *restrict Ap = ws_take(&ws, n);
   double *restrict Ax = ws_take(&ws, m);
-  double *restrict tmp_n = ws_take(&ws, n);
+  double *restrict tmp_n = has_A ? ws_take(&ws, n) : NULL;
 
   v_copy(z, x, n);
   if (has_A) {
@@ -667,28 +719,14 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
   v_zero(y, n + m);
 
   for (int iter = 0; iter < max_iter; iter++) {
-    for (int i = 0; i < n; i++) {
-      c[i] = d[i] + rho * (z[i] - y[i]);
-    }
-    if (has_A) {
-      double *restrict diff_A = Ax;
-      for (int i = 0; i < m; i++) {
-        diff_A[i] = z[n + i] - y[n + i];
-      }
-      eval_AT_vec(m, n, A_dense, A_sparse, diff_A, r);
-      v_axpy(c, r, rho, n);
-    }
+    cg_solve_unified(n, m, D_dense, D_sparse, A_dense, A_sparse, rho,
+                     rho * affine_weight, cg_tol_sq, d, z, y, x, r, p, Ap,
+                     tmp_n, Ax);
 
-    /* solve system (D + rho * (I + A^T * A)) x = c */
-    cg_solve_unified(n, m, D_dense, D_sparse, A_dense, A_sparse, rho, cg_tol_sq,
-                     c, x, r, p, Ap, tmp_n, Ax);
-
-    double max_diff = 0.0;
     double prim_res = 0.0;
     double x_max = 0.0;
     double z_max = 0.0;
-    double y_max = 0.0;
-    int nan_found = 0;
+    int nonfinite_found = 0;
 
     for (int i = 0; i < n; i++) {
       double old_z = z[i];
@@ -698,13 +736,10 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
       double y_i = y[i] + (x[i] - z_i);
       z[i] = z_i;
       y[i] = y_i;
+      c[i] = rho * (z_i - old_z);
 
-      if (isnan(x[i]) || isnan(z_i))
-        nan_found = 1;
-
-      double diff = rho * fabs(z_i - old_z);
-      if (diff > max_diff)
-        max_diff = diff;
+      if (!isfinite(x[i]) || !isfinite(z_i) || !isfinite(y_i))
+        nonfinite_found = 1;
 
       double res = fabs(x[i] - z_i);
       if (res > prim_res)
@@ -716,9 +751,6 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
       double val_z = fabs(z_i);
       if (val_z > z_max)
         z_max = val_z;
-      double val_y = rho * fabs(y_i);
-      if (val_y > y_max)
-        y_max = val_y;
     }
 
     if (has_A) {
@@ -732,12 +764,8 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
         z[n + i] = z_i;
         y[n + i] = y_i;
 
-        if (isnan(Ax[i]) || isnan(z_i))
-          nan_found = 1;
-
-        double diff = rho * fabs(z_i - old_z);
-        if (diff > max_diff)
-          max_diff = diff;
+        if (!isfinite(Ax[i]) || !isfinite(z_i) || !isfinite(y_i))
+          nonfinite_found = 1;
 
         double res = fabs(Ax[i] - z_i);
         if (res > prim_res)
@@ -746,35 +774,49 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
         double val_z = fabs(z_i);
         if (val_z > z_max)
           z_max = val_z;
-        double val_y = rho * fabs(y_i);
-        if (val_y > y_max)
-          y_max = val_y;
+        Ax[i] = rho * affine_weight * (z_i - old_z);
+      }
+      eval_AT_vec(m, n, A_dense, A_sparse, Ax, r);
+      v_axpy(c, r, 1.0, n);
+
+      /* check affine feasibility at the returned point z_x */
+      eval_A_vec(m, n, A_dense, A_sparse, z, Ax);
+      for (int i = 0; i < m; i++) {
+        if (!isfinite(Ax[i]))
+          nonfinite_found = 1;
+        double res = fabs(Ax[i] - z[n + i]);
+        if (res > prim_res)
+          prim_res = res;
+        double val_x = fabs(Ax[i]);
+        if (val_x > x_max)
+          x_max = val_x;
       }
     }
 
+    /* use transformed z change to balance penalties */
+    double admm_dual_res = get_vec_norm_inf(n, c);
+
+    /* test actual stationarity at the returned point z_x */
+    eval_D_vec(n, D_dense, D_sparse, z, c);
+    if (has_A)
+      eval_AT_vec(m, n, A_dense, A_sparse, &y[n], r);
     double dx_max = 0.0;
-    if (!has_A) {
-      for (int i = 0; i < n; i++) {
-        double val_dx = fabs(d[i] - rho * (y[i] - (z[i] - x[i])));
-        if (val_dx > dx_max)
-          dx_max = val_dx;
-      }
-    } else {
-      /* estimate dual gradient scale from x-update optimality */
-      double *restrict temp_n = c;
-      for (int i = 0; i < n; i++) {
-        temp_n[i] = rho * (y[i] - (z[i] - x[i]));
-      }
-      double *restrict temp_m = Ax;
-      for (int i = 0; i < m; i++) {
-        temp_m[i] = rho * (y[n + i] - (z[n + i] - Ax[i]));
-      }
-      eval_AT_vec(m, n, A_dense, A_sparse, temp_m, r);
-      for (int i = 0; i < n; i++) {
-        double val_dx = fabs(d[i] - (temp_n[i] + r[i]));
-        if (val_dx > dx_max)
-          dx_max = val_dx;
-      }
+    double y_max = 0.0;
+    double dual_res = 0.0;
+    for (int i = 0; i < n; i++) {
+      double dual_i = rho * y[i] + (has_A ? rho * affine_weight * r[i] : 0.0);
+      double residual = c[i] - d[i] + dual_i;
+      if (!isfinite(c[i]) || !isfinite(dual_i) || !isfinite(residual))
+        nonfinite_found = 1;
+      double val_dx = fabs(c[i]);
+      if (val_dx > dx_max)
+        dx_max = val_dx;
+      double val_y = fabs(dual_i);
+      if (val_y > y_max)
+        y_max = val_y;
+      double res = fabs(residual);
+      if (res > dual_res)
+        dual_res = res;
     }
 
     double prim_scale = 1.0 + (x_max > z_max ? x_max : z_max);
@@ -782,10 +824,34 @@ solve_admm_unified(int n, int m, const double *restrict D_dense,
         1.0 + (y_max > d_max ? (y_max > dx_max ? y_max : dx_max)
                              : (d_max > dx_max ? d_max : dx_max));
 
-    if (!nan_found && max_diff < tol * dual_scale &&
+    if (!nonfinite_found && dual_res < tol * dual_scale &&
         prim_res < tol * prim_scale) {
       v_copy(x, z, n);
       return iter + 1;
+    }
+
+    /* balance relative residuals periodically */
+    if (!nonfinite_found && (iter + 1) % 10 == 0) {
+      double relative_primal = prim_res / prim_scale;
+      double relative_dual = admm_dual_res / dual_scale;
+      double new_rho = rho;
+      if (relative_primal > 10.0 * relative_dual)
+        new_rho = 2.0 * rho;
+      else if (relative_dual > 10.0 * relative_primal)
+        new_rho = 0.5 * rho;
+      if (new_rho > 0.0 && isfinite(new_rho) && new_rho != rho) {
+        double multiplier_scale = rho / new_rho;
+        int can_rescale = 1;
+        for (int i = 0; i < n + m; i++) {
+          if (!isfinite(y[i] * multiplier_scale))
+            can_rescale = 0;
+        }
+        if (can_rescale) {
+          for (int i = 0; i < n + m; i++)
+            y[i] *= multiplier_scale;
+          rho = new_rho;
+        }
+      }
     }
   }
   v_copy(x, z, n);
@@ -1002,7 +1068,7 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
   }
 
   double norm_inf = get_matrix_norm_inf(n, D);
-  double epsilon = (norm_inf > 1e-12) ? (norm_inf * 1e-8) : 1e-8;
+  double epsilon = (norm_inf > 0.0) ? (norm_inf * 1e-8) : 1e-8;
   for (int i = 0; i < n; i++)
     D[i * n + i] += epsilon;
 

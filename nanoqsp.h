@@ -2,7 +2,10 @@
 #define NANOQSP_H
 
 #ifdef __cplusplus
+#define NANOQSP_RESTRICT
 extern "C" {
+#else
+#define NANOQSP_RESTRICT restrict
 #endif
 
 /* Standard error and status codes */
@@ -22,7 +25,7 @@ typedef enum {
   NANOQSP_STRATEGY_PROJECTED_GRADIENT,
   /* Nesterov Accelerated Projected Gradient Descent with Adaptive Restarts */
   NANOQSP_STRATEGY_ACCELERATED_GRADIENT,
-  /* Spectral Projected Gradient (Barzilai-Borwein step size) */
+  /* Spectral Projected Gradient (BB steps with exact segment line search) */
   NANOQSP_STRATEGY_SPECTRAL_GRADIENT,
   /* Alternating Direction Method of Multipliers (ADMM) */
   NANOQSP_STRATEGY_ADMM
@@ -33,18 +36,20 @@ typedef struct {
   NanoqspStrategy strategy;
   int max_iterations;
   double tolerance;
-  double *restrict workspace; /* Optional: Pre-allocated workspace buffer */
+  /* Optional: Pre-allocated workspace buffer */
+  double *NANOQSP_RESTRICT workspace;
   int workspace_size; /* Size of workspace buffer in terms of number of doubles
                        */
 } NanoqspConfig;
 
 /* Sparse matrix in Compressed Sparse Row (CSR) format */
 typedef struct {
-  int n;                         /* Number of rows */
-  int nnz;                       /* Number of non-zero elements */
-  const double *restrict values; /* Array of non-zero values (size nnz) */
-  const int *col_indices;        /* Array of column indices (size nnz) */
-  const int *row_ptr;            /* Array of row pointers (size n + 1) */
+  int n;   /* Number of rows */
+  int nnz; /* Number of non-zero elements */
+  /* Array of non-zero values (size nnz) */
+  const double *NANOQSP_RESTRICT values;
+  const int *col_indices; /* Array of column indices (size nnz) */
+  const int *row_ptr;     /* Array of row pointers (size n + 1) */
 } NanoqspCSR;
 
 /**
@@ -75,9 +80,11 @@ int nanoqsp_workspace_size_affine(int n, int m);
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
-int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
-                      const double *restrict lb, const double *restrict ub,
-                      double *restrict x, const NanoqspConfig *config);
+int nanoqsp_solve_box(int n, const double *NANOQSP_RESTRICT D,
+                      const double *NANOQSP_RESTRICT d,
+                      const double *NANOQSP_RESTRICT lb,
+                      const double *NANOQSP_RESTRICT ub,
+                      double *NANOQSP_RESTRICT x, const NanoqspConfig *config);
 
 /**
  * Solves the box-constrained quadratic programming (QP) problem with a sparse
@@ -98,9 +105,10 @@ int nanoqsp_solve_box(int n, const double *restrict D, const double *restrict d,
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
 int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
-                             const double *restrict d,
-                             const double *restrict lb,
-                             const double *restrict ub, double *restrict x,
+                             const double *NANOQSP_RESTRICT d,
+                             const double *NANOQSP_RESTRICT lb,
+                             const double *NANOQSP_RESTRICT ub,
+                             double *NANOQSP_RESTRICT x,
                              const NanoqspConfig *config);
 
 /**
@@ -121,18 +129,19 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
-int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
-                                const double *restrict b,
-                                const double *restrict lb,
-                                const double *restrict ub, double *restrict x,
+int nanoqsp_solve_least_squares(int m, int n, const double *NANOQSP_RESTRICT A,
+                                const double *NANOQSP_RESTRICT b,
+                                const double *NANOQSP_RESTRICT lb,
+                                const double *NANOQSP_RESTRICT ub,
+                                double *NANOQSP_RESTRICT x,
                                 const NanoqspConfig *config);
 
 /**
  * High-level API: Generates a prediction (dot product) given a solved model x
  * and a new feature vector.
  */
-double nanoqsp_predict(int n, const double *restrict x,
-                       const double *restrict feature_vector);
+double nanoqsp_predict(int n, const double *NANOQSP_RESTRICT x,
+                       const double *NANOQSP_RESTRICT feature_vector);
 
 /**
  * Solves the quadratic programming (QP) problem with general linear
@@ -154,13 +163,12 @@ double nanoqsp_predict(int n, const double *restrict x,
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
-int nanoqsp_solve_affine(int n, int m, const double *restrict D,
-                         const double *restrict d, const double *restrict A,
-                         const double *restrict lb_x,
-                         const double *restrict ub_x,
-                         const double *restrict lb_A,
-                         const double *restrict ub_A, double *restrict x,
-                         const NanoqspConfig *config);
+int nanoqsp_solve_affine(
+    int n, int m, const double *NANOQSP_RESTRICT D,
+    const double *NANOQSP_RESTRICT d, const double *NANOQSP_RESTRICT A,
+    const double *NANOQSP_RESTRICT lb_x, const double *NANOQSP_RESTRICT ub_x,
+    const double *NANOQSP_RESTRICT lb_A, const double *NANOQSP_RESTRICT ub_A,
+    double *NANOQSP_RESTRICT x, const NanoqspConfig *config);
 
 /**
  * Solves the quadratic programming (QP) problem with general linear constraints
@@ -181,16 +189,17 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
  * Returns:
  *   Number of iterations performed on success, or a NanoqspStatus error code.
  */
-int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
-                                const double *restrict d, const NanoqspCSR *A,
-                                const double *restrict lb_x,
-                                const double *restrict ub_x,
-                                const double *restrict lb_A,
-                                const double *restrict ub_A, double *restrict x,
-                                const NanoqspConfig *config);
+int nanoqsp_solve_affine_sparse(
+    int n, int m, const NanoqspCSR *D, const double *NANOQSP_RESTRICT d,
+    const NanoqspCSR *A, const double *NANOQSP_RESTRICT lb_x,
+    const double *NANOQSP_RESTRICT ub_x, const double *NANOQSP_RESTRICT lb_A,
+    const double *NANOQSP_RESTRICT ub_A, double *NANOQSP_RESTRICT x,
+    const NanoqspConfig *config);
 
 #ifdef __cplusplus
 }
 #endif
+
+#undef NANOQSP_RESTRICT
 
 #endif /* NANOQSP_H */

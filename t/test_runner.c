@@ -30,7 +30,9 @@ static int verify_kkt_dense(int n, const double *D, const double *d,
     double lower = lb ? lb[i] : -INFINITY;
     double upper = ub ? ub[i] : INFINITY;
     double viol = 0.0;
-    if (x[i] <= lower + 1e-9) {
+    if (lower == upper) {
+      viol = 0.0;
+    } else if (x[i] <= lower + 1e-9) {
       if (grad_i < 0.0)
         viol = -grad_i;
     } else if (x[i] >= upper - 1e-9) {
@@ -62,7 +64,9 @@ static int verify_kkt_sparse(int n, const NanoqspCSR *D, const double *d,
     double lower = lb ? lb[i] : -INFINITY;
     double upper = ub ? ub[i] : INFINITY;
     double viol = 0.0;
-    if (x[i] <= lower + 1e-9) {
+    if (lower == upper) {
+      viol = 0.0;
+    } else if (x[i] <= lower + 1e-9) {
       if (grad_i < 0.0)
         viol = -grad_i;
     } else if (x[i] >= upper - 1e-9) {
@@ -110,10 +114,15 @@ static void generate_random_qp(int n, double *D, double *d, double *lb,
   }
   for (int i = 0; i < n; i++) {
     D[i * n + i] += shift;
-    if (type == 3) {
-      /* scale diagonals by power of 10 to create ill-conditioning */
-      double scale = pow(10.0, my_rand_double(-3.0, 3.0));
-      D[i * n + i] *= scale;
+  }
+  if (type == 3) {
+    /* congruence scaling creates ill-conditioning while preserving SPD */
+    for (int i = 0; i < n; i++) {
+      double scale = pow(10.0, my_rand_double(-1.5, 1.5));
+      for (int j = 0; j < n; j++) {
+        D[i * n + j] *= scale;
+        D[j * n + i] *= scale;
+      }
     }
   }
 
@@ -251,7 +260,179 @@ int test_cross_verify(int test_id) {
   return match ? 0 : -2;
 }
 
+/* small numerical regressions use the exact advertised workspace sizes */
+static int numerical_box(int sparse, int n, const double *D, const double *d,
+                         const double *lb, const double *ub, double *x,
+                         NanoqspConfig config) {
+  int cols[] = {0, 1, 0, 1};
+  int rows[] = {0, n, n * n};
+  NanoqspCSR csr = {n, n * n, D, cols, rows};
+  int size = sparse ? nanoqsp_workspace_size_box_sparse(n, config.strategy)
+                    : nanoqsp_workspace_size_box(n, config.strategy);
+  if (size < 0)
+    return -10;
+  double *ws = size ? malloc((size_t)size * sizeof(double)) : NULL;
+  if (size && !ws)
+    return -10;
+  config.workspace = ws;
+  config.workspace_size = size;
+  int ret = sparse ? nanoqsp_solve_box_sparse(n, &csr, d, lb, ub, x, &config)
+                   : nanoqsp_solve_box(n, D, d, lb, ub, x, &config);
+  free(ws);
+  return ret;
+}
+
+static int numerical_affine(int sparse, int n, const double *D, const double *d,
+                            const double *A, const double *lb, const double *ub,
+                            const double *lb_A, const double *ub_A, double *x,
+                            NanoqspConfig config) {
+  int cols[] = {0, 1, 0, 1};
+  int rows[] = {0, n, n * n};
+  NanoqspCSR csr_D = {n, n * n, D, cols, rows};
+  NanoqspCSR csr_A = {1, n, A, cols, rows};
+  int size = nanoqsp_workspace_size_affine(n, 1);
+  double *ws = malloc((size_t)size * sizeof(double));
+  if (!ws)
+    return -10;
+  config.workspace = ws;
+  config.workspace_size = size;
+  int ret = sparse ? nanoqsp_solve_affine_sparse(n, 1, &csr_D, d, &csr_A, lb,
+                                                 ub, lb_A, ub_A, x, &config)
+                   : nanoqsp_solve_affine(n, 1, D, d, A, lb, ub, lb_A, ub_A, x,
+                                          &config);
+  free(ws);
+  return ret;
+}
+
+static int numerical_solution(int ret, int n, const double *x,
+                              const double *expected, double tol) {
+  if (ret < 0) {
+    fprintf(stderr, "Numerical regression failed with status %d\n", ret);
+    return -10;
+  }
+  for (int i = 0; i < n; i++) {
+    if (!(fabs(x[i] - expected[i]) <= tol)) {
+      fprintf(stderr, "x[%d]=%.17g, expected %.17g within %.3g\n", i, x[i],
+              expected[i], tol);
+      return -10;
+    }
+  }
+  return 0;
+}
+
+static int run_numerical_test(int test_id, int strategy_id, double *x) {
+  NanoqspConfig config = {.strategy = (NanoqspStrategy)strategy_id,
+                          .max_iterations = 1000,
+                          .tolerance = 1e-9};
+  int sparse = test_id % 2 == 0;
+  if (test_id == 33 || test_id == 34) {
+    /* negative gradient at a fixed coordinate is still optimal */
+    double D[] = {2.0, 1.0, 1.0, 2.0}, d[] = {2.0, 2.0};
+    double lb[] = {0.0, -10.0}, ub[] = {0.0, 10.0};
+    double expected[] = {0.0, 1.0};
+    int ret = numerical_box(sparse, 2, D, d, lb, ub, x, config);
+    return numerical_solution(ret, 2, x, expected, 1e-7);
+  } else if (test_id == 35 || test_id == 36) {
+    double D[] = {1e-13}, d[] = {1.0}, lb[] = {0.0}, ub[] = {1.0};
+    double expected[] = {1.0};
+    int ret = numerical_box(sparse, 1, D, d, lb, ub, x, config);
+    return numerical_solution(ret, 1, x, expected, 1e-7);
+  } else if (test_id == 37 || test_id == 38) {
+    /* unsafeguarded BB steps cycle on this strictly convex QP */
+    double D[] = {7.5, 3.9, 3.9, 2.2}, d[] = {2.3, 0.7};
+    double lb[] = {-1.0, -1.0}, ub[] = {1.0, 1.0};
+    double expected[] = {6.2 / 7.5, -1.0};
+    int ret = numerical_box(sparse, 2, D, d, lb, ub, x, config);
+    return numerical_solution(ret, 2, x, expected, 1e-7);
+  } else if (test_id == 39 || test_id == 40) {
+    double scales[] = {1e-14, 1e-12, 1.0, 1e12};
+    for (int k = 0; k < 4; k++) {
+      double scale = scales[k];
+      double D[] = {scale, 0.0, 0.0, 2.0 * scale};
+      double d[] = {scale, 2.0 * scale}, lb[] = {0.0, 0.0}, ub[] = {2.0, 2.0};
+      double expected[] = {1.0, 1.0};
+      config.tolerance = scale < 1.0 ? scale * 1e-8 : 1e-8;
+      x[0] = x[1] = 0.0;
+      int ret = numerical_box(sparse, 2, D, d, lb, ub, x, config);
+      if (numerical_solution(ret, 2, x, expected, 1e-6))
+        return -10;
+    }
+    return 0;
+  } else if (test_id >= 41 && test_id <= 44) {
+    double scales[] = {1.0, 1e3, 1e6};
+    config.strategy = NANOQSP_STRATEGY_ADMM;
+    config.tolerance = 1e-8;
+    for (int k = 0; k < 3; k++) {
+      double scale = scales[k];
+      x[0] = x[1] = 0.0;
+      if (test_id <= 42) {
+        double D[] = {1.0}, d[] = {1.0}, A[] = {scale};
+        double lb_A[] = {0.0}, ub_A[] = {10.0 * scale};
+        double expected[] = {1.0};
+        int ret = numerical_affine(sparse, 1, D, d, A, NULL, NULL, lb_A, ub_A,
+                                   x, config);
+        if (numerical_solution(ret, 1, x, expected, 1e-6))
+          return -10;
+      } else {
+        double D[] = {1.0, 0.0, 0.0, 2.0}, d[] = {1.0, 1.0};
+        double A[] = {scale, scale}, lb[] = {0.0, 0.0}, ub[] = {0.5, 1.0};
+        double lb_A[] = {scale}, ub_A[] = {scale};
+        double expected[] = {0.5, 0.5};
+        int ret =
+            numerical_affine(sparse, 2, D, d, A, lb, ub, lb_A, ub_A, x, config);
+        if (numerical_solution(ret, 2, x, expected, 1e-6) || x[0] < lb[0] ||
+            x[0] > ub[0] || x[1] < lb[1] || x[1] > ub[1] ||
+            !(fabs(x[0] + x[1] - 1.0) <= 5e-8))
+          return -10;
+      }
+    }
+    return 0;
+  } else if (test_id == 45 || test_id == 46) {
+    double D[] = {1.0}, d[] = {1.0}, expected[] = {1.0};
+    config.strategy = NANOQSP_STRATEGY_ADMM;
+    config.tolerance = 1e-14;
+    int ret = numerical_box(sparse, 1, D, d, NULL, NULL, x, config);
+    /* returned scalar gradient must meet requested KKT tolerance */
+    return numerical_solution(ret, 1, x, expected, 2.1e-14);
+  } else if (test_id == 47) {
+    double scales[] = {1.0, 1.0001e-6, 1e-6};
+    double expected[] = {1.0 / (1.0 + 1e-8)};
+    config.tolerance = 1e-20;
+    int size = nanoqsp_workspace_size_least_squares(1, config.strategy);
+    double *ws = malloc((size_t)size * sizeof(double));
+    if (!ws)
+      return -10;
+    config.workspace = ws;
+    config.workspace_size = size;
+    int result = 0;
+    for (int k = 0; k < 3; k++) {
+      double A[] = {scales[k]}, b[] = {scales[k]};
+      x[0] = 0.0;
+      int ret = nanoqsp_solve_least_squares(1, 1, A, b, NULL, NULL, x, &config);
+      if (numerical_solution(ret, 1, x, expected, 1e-7)) {
+        result = -10;
+        break;
+      }
+    }
+    free(ws);
+    return result;
+  } else if (test_id == 48 || test_id == 49) {
+    /* small iterate change must not masquerade as affine convergence */
+    double D[] = {1.0}, d[] = {1.0}, A[] = {1e6};
+    double lb_A[] = {0.0}, ub_A[] = {1e7};
+    config.strategy = NANOQSP_STRATEGY_ADMM;
+    config.max_iterations = 1;
+    config.tolerance = 1e-6;
+    int ret = numerical_affine(test_id == 49, 1, D, d, A, NULL, NULL, lb_A,
+                               ub_A, x, config);
+    return ret == NANOQSP_ERR_MAX_ITERATIONS ? 0 : -10;
+  }
+  return -99;
+}
+
 int run_test(int test_id, int strategy_id, double *out_x) {
+  if (test_id >= 33)
+    return run_numerical_test(test_id, strategy_id, out_x);
   NanoqspConfig config = {
       .strategy = (NanoqspStrategy)strategy_id,
       .max_iterations = 2000,

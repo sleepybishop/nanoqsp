@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := all
+
 CC = gcc
 CFLAGS = -Wall -Wextra -O3 -std=c99 -I. -MMD -MP
 LDFLAGS = -lm
@@ -104,11 +106,14 @@ bench_sparse: $(BENCHMARK_SPARSE)
 	@echo "=================================================="
 
 check: all
-	prove -v t/
+	NANOQSP_CC="$(CC)" \
+	NANOQSP_CPPFLAGS="$(CPPFLAGS)" NANOQSP_CFLAGS="$(CFLAGS)" \
+	NANOQSP_LDFLAGS="$(LDFLAGS)" prove -v t/
 
-check-asan: CFLAGS += -fsanitize=address,undefined -fno-omit-frame-pointer
-check-asan: LDFLAGS += -fsanitize=address,undefined
-check-asan: clean check
+check-asan:
+	$(MAKE) clean
+	$(MAKE) check CFLAGS="$(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer" \
+	LDFLAGS="$(LDFLAGS) -fsanitize=address,undefined"
 
 check-embedded: clean
 	$(MAKE) $(LIB_NAME) CPPFLAGS="$(CPPFLAGS) -DNANOQSP_NO_LIBC"
