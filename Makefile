@@ -109,6 +109,7 @@ check: all
 	NANOQSP_CC="$(CC)" \
 	NANOQSP_CPPFLAGS="$(CPPFLAGS)" NANOQSP_CFLAGS="$(CFLAGS)" \
 	NANOQSP_LDFLAGS="$(LDFLAGS)" prove -v t/
+	if [ -d examples/svm ]; then $(MAKE) -C examples/svm check CC="$(CC)" CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"; fi
 
 check-asan:
 	$(MAKE) clean
@@ -130,5 +131,6 @@ indent:
 
 clean:
 	$(RM) *.o *.d $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) bench_classic bench_sse bench_avx $(BENCHMARK_SPARSE) .nanoqsp-backend-*
+	if [ -d examples/svm ]; then $(MAKE) -C examples/svm clean; fi
 
 .PHONY: all clean indent check check-asan check-embedded bench bench_sparse

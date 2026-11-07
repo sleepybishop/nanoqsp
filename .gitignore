@@ -9,3 +9,5 @@ bench_sse
 bench_avx
 benchmark_sparse
 .nanoqsp-backend-*
+/examples/svm/svm_train
+/examples/svm/svm_predict
