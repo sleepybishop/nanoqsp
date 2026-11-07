@@ -17,7 +17,7 @@ else ifeq ($(RVV), 1)
   DEFAULT_SIMD_FLAGS = -DNANOQSP_RVV
 else
   SIMD_BACKEND = sse
-  DEFAULT_SIMD_FLAGS = -DNANOQSP_SSE -msse3
+  DEFAULT_SIMD_FLAGS = -DNANOQSP_SSE
 endif
 
 BACKEND_STAMP = .nanoqsp-backend-$(SIMD_BACKEND)
@@ -62,7 +62,7 @@ nanoqsp_blas_c.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_classic.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 nanoqsp_blas_s.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_sse.c
-	$(CC) $(CFLAGS) -DNANOQSP_SSE -msse3 -c $< -o $@
+	$(CC) $(CFLAGS) -DNANOQSP_SSE -c $< -o $@
 
 nanoqsp_blas_a.o: nanoqsp_blas.c nanoqsp_blas.h nanoqsp_blas_avx.c
 	$(CC) $(CFLAGS) -DNANOQSP_AVX -mavx -c $< -o $@
@@ -71,7 +71,7 @@ bench_classic: benchmark.o nanoqsp.o nanoqsp_blas_c.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 bench_sse: benchmark.o nanoqsp.o nanoqsp_blas_s.o
-	$(CC) $(CFLAGS) -DNANOQSP_SSE -msse3 -o $@ $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) -DNANOQSP_SSE -o $@ $^ $(LDFLAGS)
 
 bench_avx: benchmark.o nanoqsp.o nanoqsp_blas_a.o
 	$(CC) $(CFLAGS) -DNANOQSP_AVX -mavx -o $@ $^ $(LDFLAGS)
@@ -108,6 +108,6 @@ indent:
 	clang-format -i nanoqsp.h nanoqsp.c example.c t/test_runner.c solve_cli.c nanoqsp_blas.h nanoqsp_blas.c nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c nanoqsp_blas_neon.c nanoqsp_blas_rvv.c benchmark.c benchmark_sparse.c
 
 clean:
-	rm -f $(OBJS) $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) benchmark.o nanoqsp_blas_c.o nanoqsp_blas_s.o nanoqsp_blas_a.o bench_classic bench_sse bench_avx $(BENCHMARK_SPARSE) .nanoqsp-backend-*
+	rm -f $(OBJS) $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) benchmark.o nanoqsp_blas_c.o nanoqsp_blas_s.o nanoqsp_blas_a.o nanoqsp_blas_classic.o bench_classic bench_sse bench_avx $(BENCHMARK_SPARSE) .nanoqsp-backend-*
 
 .PHONY: all clean indent check bench bench_sparse

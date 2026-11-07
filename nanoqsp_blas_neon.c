@@ -36,6 +36,9 @@ double v_dot(const double *restrict x, const double *restrict y, int n) {
     sum3 = vfmaq_f64(sum3, vld1q_f64(&x[i + 6]), vld1q_f64(&y[i + 6]));
   }
   float64x2_t sum_vec = vaddq_f64(vaddq_f64(sum0, sum1), vaddq_f64(sum2, sum3));
+  for (; i <= n - 2; i += 2) {
+    sum_vec = vfmaq_f64(sum_vec, vld1q_f64(&x[i]), vld1q_f64(&y[i]));
+  }
   double sum = vgetq_lane_f64(sum_vec, 0) + vgetq_lane_f64(sum_vec, 1);
   for (; i < n; i++) {
     sum += x[i] * y[i];
@@ -56,6 +59,9 @@ double v_norm1(const double *restrict x, int n) {
     sum3 = vaddq_f64(sum3, vabsq_f64(vld1q_f64(&x[i + 6])));
   }
   float64x2_t sum_vec = vaddq_f64(vaddq_f64(sum0, sum1), vaddq_f64(sum2, sum3));
+  for (; i <= n - 2; i += 2) {
+    sum_vec = vaddq_f64(sum_vec, vabsq_f64(vld1q_f64(&x[i])));
+  }
   double sum = vgetq_lane_f64(sum_vec, 0) + vgetq_lane_f64(sum_vec, 1);
   for (; i < n; i++) {
     sum += fabs(x[i]);

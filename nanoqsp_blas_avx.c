@@ -41,6 +41,10 @@ double v_dot(const double *restrict x, const double *restrict y, int n) {
   }
   __m256d acc =
       _mm256_add_pd(_mm256_add_pd(acc0, acc1), _mm256_add_pd(acc2, acc3));
+  for (; i <= n - 4; i += 4) {
+    acc = _mm256_add_pd(
+        acc, _mm256_mul_pd(_mm256_loadu_pd(&x[i]), _mm256_loadu_pd(&y[i])));
+  }
   double temp[4];
   _mm256_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1] + temp[2] + temp[3];
@@ -69,6 +73,10 @@ double v_norm1(const double *restrict x, int n) {
   }
   __m256d acc =
       _mm256_add_pd(_mm256_add_pd(acc0, acc1), _mm256_add_pd(acc2, acc3));
+  for (; i <= n - 4; i += 4) {
+    acc =
+        _mm256_add_pd(acc, _mm256_andnot_pd(sign_bit, _mm256_loadu_pd(&x[i])));
+  }
   double temp[4];
   _mm256_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1] + temp[2] + temp[3];

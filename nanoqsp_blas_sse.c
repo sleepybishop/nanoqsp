@@ -40,6 +40,9 @@ double v_dot(const double *restrict x, const double *restrict y, int n) {
         acc3, _mm_mul_pd(_mm_loadu_pd(&x[i + 6]), _mm_loadu_pd(&y[i + 6])));
   }
   __m128d acc = _mm_add_pd(_mm_add_pd(acc0, acc1), _mm_add_pd(acc2, acc3));
+  for (; i <= n - 2; i += 2) {
+    acc = _mm_add_pd(acc, _mm_mul_pd(_mm_loadu_pd(&x[i]), _mm_loadu_pd(&y[i])));
+  }
   double temp[2];
   _mm_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1];
@@ -63,6 +66,9 @@ double v_norm1(const double *restrict x, int n) {
     acc3 = _mm_add_pd(acc3, _mm_andnot_pd(sign_bit, _mm_loadu_pd(&x[i + 6])));
   }
   __m128d acc = _mm_add_pd(_mm_add_pd(acc0, acc1), _mm_add_pd(acc2, acc3));
+  for (; i <= n - 2; i += 2) {
+    acc = _mm_add_pd(acc, _mm_andnot_pd(sign_bit, _mm_loadu_pd(&x[i])));
+  }
   double temp[2];
   _mm_storeu_pd(temp, acc);
   double sum = temp[0] + temp[1];
