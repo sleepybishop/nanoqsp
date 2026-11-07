@@ -68,10 +68,17 @@ void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
     return;
   float64x2_t a = vdupq_n_f64(alpha);
   int i = 0;
+  for (; i <= n - 8; i += 8) {
+    vst1q_f64(&y[i], vfmaq_f64(vld1q_f64(&y[i]), a, vld1q_f64(&x[i])));
+    vst1q_f64(&y[i + 2],
+              vfmaq_f64(vld1q_f64(&y[i + 2]), a, vld1q_f64(&x[i + 2])));
+    vst1q_f64(&y[i + 4],
+              vfmaq_f64(vld1q_f64(&y[i + 4]), a, vld1q_f64(&x[i + 4])));
+    vst1q_f64(&y[i + 6],
+              vfmaq_f64(vld1q_f64(&y[i + 6]), a, vld1q_f64(&x[i + 6])));
+  }
   for (; i <= n - 2; i += 2) {
-    float64x2_t xi = vld1q_f64(&x[i]);
-    float64x2_t yi = vld1q_f64(&y[i]);
-    vst1q_f64(&y[i], vfmaq_f64(yi, a, xi));
+    vst1q_f64(&y[i], vfmaq_f64(vld1q_f64(&y[i]), a, vld1q_f64(&x[i])));
   }
   for (; i < n; i++) {
     y[i] += alpha * x[i];

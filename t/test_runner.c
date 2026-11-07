@@ -1,5 +1,9 @@
 #include "nanoqsp.h"
+#include "nanoqsp_blas.h"
 #include <math.h>
+#ifdef NANOQSP_RVV
+#include <riscv_vector.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -481,10 +485,105 @@ int run_test(int test_id, int strategy_id, double *out_x) {
     if (nanoqsp_workspace_size_box(10, NANOQSP_STRATEGY_ADMM) != 60 ||
         nanoqsp_workspace_size_box_sparse(
             10, NANOQSP_STRATEGY_COORDINATE_DESCENT) != 20 ||
+        nanoqsp_workspace_size_box_sparse(
+            10, NANOQSP_STRATEGY_PROJECTED_GRADIENT) != 10 ||
+        nanoqsp_workspace_size_box_sparse(
+            10, NANOQSP_STRATEGY_ACCELERATED_GRADIENT) != 20 ||
         nanoqsp_workspace_size_least_squares(
             10, NANOQSP_STRATEGY_SPECTRAL_GRADIENT) != 140 ||
         nanoqsp_workspace_size_affine(10, 3) != 79)
       return -10;
+    return 0;
+  } else if (test_id == 27) {
+    /* duplicate CSR diagonal entries must be summed in sparse CD */
+    double values[] = {2.0, 2.0};
+    int col_indices[] = {0, 0};
+    int row_ptr[] = {0, 2};
+    NanoqspCSR D = {1, 2, values, col_indices, row_ptr};
+    double d[] = {2.0};
+    out_x[0] = 0.0;
+    config.strategy = NANOQSP_STRATEGY_COORDINATE_DESCENT;
+    return nanoqsp_solve_box_sparse(1, &D, d, NULL, NULL, out_x, &config);
+  } else if (test_id == 28) {
+    /* nan in config tolerance or matrix must not cause false convergence */
+    double D[] = {NAN};
+    double d[] = {1.0};
+    out_x[0] = 0.0;
+    int r1 = nanoqsp_solve_box(1, D, d, NULL, NULL, out_x, &config);
+    double D_ok[] = {1.0};
+    config.tolerance = NAN;
+    int r2 = nanoqsp_solve_box(1, D_ok, d, NULL, NULL, out_x, &config);
+    if (r1 != NANOQSP_ERR_MAX_ITERATIONS || r2 != NANOQSP_ERR_INVALID_ARG)
+      return -10;
+    return 0;
+  } else if (test_id == 29 || test_id == 30) {
+    /* small steps can fail KKT before accelerated gradient converges */
+    double D[] = {1e8, 0.0, 0.0, 1e12};
+    double values[] = {1e8, 1e12};
+    int col_indices[] = {0, 1};
+    int row_ptr[] = {0, 1, 2};
+    NanoqspCSR sparse_D = {2, 2, values, col_indices, row_ptr};
+    double d[] = {1e6, 1e6};
+    out_x[0] = out_x[1] = 0.0;
+    config.strategy = NANOQSP_STRATEGY_ACCELERATED_GRADIENT;
+    config.max_iterations = 1000;
+    config.tolerance = 1e-6;
+    int ret = test_id == 29
+                  ? nanoqsp_solve_box(2, D, d, NULL, NULL, out_x, &config)
+                  : nanoqsp_solve_box_sparse(2, &sparse_D, d, NULL, NULL, out_x,
+                                             &config);
+    if (ret < 0 || !(fabs(out_x[0] - 0.01) < 1.1e-8) ||
+        !(fabs(out_x[1] - 1e-6) < 1e-12))
+      return -10;
+    return 0;
+  } else if (test_id == 31) {
+    /* exercise empty, short, full-vector, and partial-tail reductions */
+    int max_n = 257;
+#ifdef NANOQSP_RVV
+    max_n = (int)(2 * __riscv_vsetvlmax_e64m4() + 1);
+#endif
+    double *a = malloc((size_t)max_n * sizeof(double));
+    double *b = malloc((size_t)max_n * sizeof(double));
+    if (a == NULL || b == NULL) {
+      free(a);
+      free(b);
+      return -10;
+    }
+    double dot = 0.0;
+    double norm = 0.0;
+    int ret = 0;
+    for (int n = 0; n <= max_n; n++) {
+      if (n > 0) {
+        a[n - 1] = (n % 7) - 3;
+        b[n - 1] = (n % 5) - 2;
+        dot += a[n - 1] * b[n - 1];
+        norm += fabs(a[n - 1]);
+      }
+      if (v_dot(a, b, n) != dot || v_norm1(a, n) != norm) {
+        fprintf(stderr, "Vector reduction mismatch at length %d\n", n);
+        ret = -10;
+        break;
+      }
+    }
+    free(a);
+    free(b);
+    return ret;
+  } else if (test_id == 32) {
+    /* a one-entry CSR row must retain its norm on vector backends */
+    double values[] = {100.0};
+    int col_indices[] = {0};
+    int row_ptr[] = {0, 1};
+    NanoqspCSR D = {1, 1, values, col_indices, row_ptr};
+    double d[] = {100.0};
+    config.max_iterations = 10;
+    for (int strategy = NANOQSP_STRATEGY_PROJECTED_GRADIENT;
+         strategy <= NANOQSP_STRATEGY_ACCELERATED_GRADIENT; strategy++) {
+      config.strategy = (NanoqspStrategy)strategy;
+      out_x[0] = 0.0;
+      int ret = nanoqsp_solve_box_sparse(1, &D, d, NULL, NULL, out_x, &config);
+      if (ret < 0 || !(fabs(out_x[0] - 1.0) < 1e-6))
+        return -10;
+    }
     return 0;
   }
   return -99;

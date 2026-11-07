@@ -83,10 +83,25 @@ void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
     return;
   __m256d a = _mm256_set1_pd(alpha);
   int i = 0;
+  for (; i <= n - 16; i += 16) {
+    _mm256_storeu_pd(&y[i],
+                     _mm256_add_pd(_mm256_loadu_pd(&y[i]),
+                                   _mm256_mul_pd(a, _mm256_loadu_pd(&x[i]))));
+    _mm256_storeu_pd(
+        &y[i + 4], _mm256_add_pd(_mm256_loadu_pd(&y[i + 4]),
+                                 _mm256_mul_pd(a, _mm256_loadu_pd(&x[i + 4]))));
+    _mm256_storeu_pd(
+        &y[i + 8], _mm256_add_pd(_mm256_loadu_pd(&y[i + 8]),
+                                 _mm256_mul_pd(a, _mm256_loadu_pd(&x[i + 8]))));
+    _mm256_storeu_pd(
+        &y[i + 12],
+        _mm256_add_pd(_mm256_loadu_pd(&y[i + 12]),
+                      _mm256_mul_pd(a, _mm256_loadu_pd(&x[i + 12]))));
+  }
   for (; i <= n - 4; i += 4) {
-    __m256d xi = _mm256_loadu_pd(&x[i]);
-    __m256d yi = _mm256_loadu_pd(&y[i]);
-    _mm256_storeu_pd(&y[i], _mm256_add_pd(yi, _mm256_mul_pd(a, xi)));
+    _mm256_storeu_pd(&y[i],
+                     _mm256_add_pd(_mm256_loadu_pd(&y[i]),
+                                   _mm256_mul_pd(a, _mm256_loadu_pd(&x[i]))));
   }
   for (; i < n; i++) {
     y[i] += alpha * x[i];

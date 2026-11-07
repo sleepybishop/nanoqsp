@@ -105,7 +105,7 @@ check: all
 	prove -v t/
 
 indent:
-	clang-format -i nanoqsp.h nanoqsp.c example.c t/test_runner.c solve_cli.c nanoqsp_blas.h nanoqsp_blas.c nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c benchmark.c benchmark_sparse.c
+	clang-format -i nanoqsp.h nanoqsp.c example.c t/test_runner.c solve_cli.c nanoqsp_blas.h nanoqsp_blas.c nanoqsp_blas_classic.c nanoqsp_blas_sse.c nanoqsp_blas_avx.c nanoqsp_blas_neon.c nanoqsp_blas_rvv.c benchmark.c benchmark_sparse.c
 
 clean:
 	rm -f $(OBJS) $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) benchmark.o nanoqsp_blas_c.o nanoqsp_blas_s.o nanoqsp_blas_a.o bench_classic bench_sse bench_avx $(BENCHMARK_SPARSE) .nanoqsp-backend-*

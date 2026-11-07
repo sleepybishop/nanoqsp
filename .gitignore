@@ -4,4 +4,8 @@
 example
 test_runner
 solve_cli
+bench_classic
+bench_sse
+bench_avx
+benchmark_sparse
 .nanoqsp-backend-*

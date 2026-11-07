@@ -52,7 +52,14 @@ double v_norm1(const double *restrict x, int n) {
 void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
   if (alpha == 0.0)
     return;
-  for (int i = 0; i < n; i++) {
+  int i = 0;
+  for (; i <= n - 4; i += 4) {
+    y[i] += alpha * x[i];
+    y[i + 1] += alpha * x[i + 1];
+    y[i + 2] += alpha * x[i + 2];
+    y[i + 3] += alpha * x[i + 3];
+  }
+  for (; i < n; i++) {
     y[i] += alpha * x[i];
   }
 }

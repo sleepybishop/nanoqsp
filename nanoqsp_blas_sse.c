@@ -77,10 +77,22 @@ void v_axpy(double *restrict y, const double *restrict x, double alpha, int n) {
     return;
   __m128d a = _mm_set1_pd(alpha);
   int i = 0;
+  for (; i <= n - 8; i += 8) {
+    _mm_storeu_pd(&y[i], _mm_add_pd(_mm_loadu_pd(&y[i]),
+                                    _mm_mul_pd(a, _mm_loadu_pd(&x[i]))));
+    _mm_storeu_pd(&y[i + 2],
+                  _mm_add_pd(_mm_loadu_pd(&y[i + 2]),
+                             _mm_mul_pd(a, _mm_loadu_pd(&x[i + 2]))));
+    _mm_storeu_pd(&y[i + 4],
+                  _mm_add_pd(_mm_loadu_pd(&y[i + 4]),
+                             _mm_mul_pd(a, _mm_loadu_pd(&x[i + 4]))));
+    _mm_storeu_pd(&y[i + 6],
+                  _mm_add_pd(_mm_loadu_pd(&y[i + 6]),
+                             _mm_mul_pd(a, _mm_loadu_pd(&x[i + 6]))));
+  }
   for (; i <= n - 2; i += 2) {
-    __m128d xi = _mm_loadu_pd(&x[i]);
-    __m128d yi = _mm_loadu_pd(&y[i]);
-    _mm_storeu_pd(&y[i], _mm_add_pd(yi, _mm_mul_pd(a, xi)));
+    _mm_storeu_pd(&y[i], _mm_add_pd(_mm_loadu_pd(&y[i]),
+                                    _mm_mul_pd(a, _mm_loadu_pd(&x[i]))));
   }
   for (; i < n; i++) {
     y[i] += alpha * x[i];
