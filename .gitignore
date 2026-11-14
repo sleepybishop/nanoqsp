@@ -10,6 +10,10 @@ lib/*.d
 examples/*.o
 examples/*.d
 examples/least_squares
+examples/svm/*.o
+examples/svm/*.d
+examples/svm/svm_train
+examples/svm/svm_predict
 t/00util/*.o
 t/00util/*.d
 t/00util/test_runner

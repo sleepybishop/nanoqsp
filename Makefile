@@ -14,7 +14,9 @@ OBJ = \
 	lib/qsp_admm.o
 
 EXAMPLES = \
-	examples/least_squares
+	examples/least_squares \
+	examples/svm/svm_train \
+	examples/svm/svm_predict
 
 TEST_UTILS = \
 	t/00util/test_runner
@@ -23,6 +25,9 @@ BENCHMARK = benchmark
 
 PROG_OBJS = \
 	examples/least_squares.o \
+	examples/svm/svm.o \
+	examples/svm/svm_train.o \
+	examples/svm/svm_predict.o \
 	t/00util/test_runner.o \
 	benchmark.o
 
@@ -41,6 +46,9 @@ lib/%.o: lib/%.c
 examples/%.o: examples/%.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) -c $< -o $@
 
+examples/svm/%.o: examples/svm/%.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) -c $< -o $@
+
 t/00util/%.o: t/00util/%.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) -c $< -o $@
 
@@ -49,6 +57,12 @@ benchmark.o: benchmark.c
 
 examples/least_squares: examples/least_squares.o $(LIB_NAME)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB_NAME) $(LDFLAGS)
+
+examples/svm/svm_train: examples/svm/svm_train.o examples/svm/svm.o $(LIB_NAME)
+	$(CC) $(CFLAGS) -o $@ examples/svm/svm_train.o examples/svm/svm.o $(LIB_NAME) $(LDFLAGS)
+
+examples/svm/svm_predict: examples/svm/svm_predict.o examples/svm/svm.o $(LIB_NAME)
+	$(CC) $(CFLAGS) -o $@ examples/svm/svm_predict.o examples/svm/svm.o $(LIB_NAME) $(LDFLAGS)
 
 t/00util/test_runner: t/00util/test_runner.o $(LIB_NAME)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB_NAME) $(LDFLAGS)
@@ -90,7 +104,7 @@ check-embedded:
 	$(MAKE) clean
 
 indent:
-	clang-format -i lib/*.c include/*.h examples/*.c t/00util/*.c benchmark.c
+	clang-format -i lib/*.c include/*.h examples/*.c examples/svm/*.c examples/svm/*.h t/00util/*.c benchmark.c
 
 clean:
 	$(RM) $(OBJ) $(PROG_OBJS) $(DEPS) $(LIB_NAME) $(EXAMPLES) $(TEST_UTILS) $(BENCHMARK)

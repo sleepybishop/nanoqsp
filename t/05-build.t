@@ -40,16 +40,17 @@ sub run_command {
 
 # Exercise the real dependency graph without requiring a second toolchain.
 my $fixture = "$tmp/build";
-make_path("$fixture/include", "$fixture/lib", "$fixture/examples",
+make_path("$fixture/include", "$fixture/lib", "$fixture/examples/svm",
           "$fixture/t/00util", "$fixture/bin");
 copy('Makefile', "$fixture/Makefile") or die "copy Makefile: $!";
 for my $hdr (qw(include/nanoqsp.h include/qsp_arena.h include/qsp_blas.h
-                include/qsp_internal.h)) {
+                include/qsp_internal.h examples/svm/svm.h)) {
     write_file("$fixture/$hdr", "/* header fixture */\n");
 }
 for my $source (qw(lib/nanoqsp.c lib/qsp_blas.c lib/qsp_box.c lib/qsp_admm.c
-                   examples/least_squares.c t/00util/test_runner.c
-                   benchmark.c)) {
+                   examples/least_squares.c examples/svm/svm.c
+                   examples/svm/svm_train.c examples/svm/svm_predict.c
+                   t/00util/test_runner.c benchmark.c)) {
     write_file("$fixture/$source", "/* source fixture */\n");
 }
 write_file("$fixture/bin/compiler", <<'COMPILER');
@@ -108,8 +109,9 @@ use strict;
 use warnings;
 die 'check ran before cleanup finished' unless -e '.clean-complete';
 for my $path (qw(lib/nanoqsp.o lib/qsp_blas.o lib/qsp_box.o lib/qsp_admm.o
-                 libnanoqsp.a examples/least_squares t/00util/test_runner
-                 benchmark)) {
+                 libnanoqsp.a examples/least_squares examples/svm/svm.o
+                 examples/svm/svm_train examples/svm/svm_predict
+                 t/00util/test_runner benchmark)) {
     open my $file, '<', $path or die "$path: $!";
     local $/;
     my $flags = <$file>;
