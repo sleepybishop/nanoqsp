@@ -3,16 +3,22 @@ use warnings;
 use Test::More;
 
 my @strategies = (0, 1, 2, 3, 4);
-my @strategy_names = ("Coordinate Descent", "Projected Gradient", "Accelerated Gradient", "Spectral Projected Gradient", "ADMM");
+my @strategy_names = (
+    "Coordinate Descent",
+    "Projected Gradient",
+    "Accelerated Gradient",
+    "Spectral Projected Gradient",
+    "ADMM"
+);
 
 plan tests => 32;
 
-for my $s_idx (0..$#strategies) {
+for my $s_idx (0 .. $#strategies) {
     my $strat = $strategies[$s_idx];
     my $s_name = $strategy_names[$s_idx];
 
     {
-        my $output = `./test_runner 11 $strat`;
+        my $output = `./t/00util/test_runner 11 $strat`;
         chomp($output);
         if ($output =~ /RET:(\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
             my ($ret, $x0, $x1) = ($1, $2, $3);
@@ -22,11 +28,12 @@ for my $s_idx (0..$#strategies) {
                 or diag("Got: x0=$x0, x1=$x1 (err=$err)");
         } else {
             fail("$s_name - Sparse Test 11 output format mismatch");
+            fail("$s_name - Sparse Test 11 solution check skipped");
         }
     }
 
     {
-        my $output = `./test_runner 12 $strat`;
+        my $output = `./t/00util/test_runner 12 $strat`;
         chomp($output);
         if ($output =~ /RET:(\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
             my ($ret, $x0, $x1) = ($1, $2, $3);
@@ -36,22 +43,21 @@ for my $s_idx (0..$#strategies) {
                 or diag("Got: x0=$x0, x1=$x1 (err=$err)");
         } else {
             fail("$s_name - Sparse Test 12 output format mismatch");
+            fail("$s_name - Sparse Test 12 solution check skipped");
         }
     }
 
     {
-        my $output = `./test_runner 13 $strat`;
+        my $output = `./t/00util/test_runner 13 $strat`;
         chomp($output);
         ok($output =~ /RET:-1/, "$s_name - Sparse Test 13 returns error for invalid arguments");
     }
 
     {
-        my $output = `./test_runner 14 $strat`;
+        my $output = `./t/00util/test_runner 14 $strat`;
         chomp($output);
-        if ($output =~ /RET:([\d\.-]+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
-            my ($ret, $x0, $x1) = ($1, $2, $3);
-            # Note CD fails on fully singular matrices because all diag is 0, returning -2 (invalid strategy or iterations, actually 1000 iter).
-            # But the solution shouldn't crash.
+        if ($output =~ /RET:(-?\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
+            my ($ret) = ($1);
             ok($ret != -1, "$s_name - Sparse Test 14 handles singular matrix");
         } else {
             fail("$s_name - Sparse Test 14 output format mismatch");
@@ -60,15 +66,16 @@ for my $s_idx (0..$#strategies) {
 }
 
 {
-    my $output = `./test_runner 16 4`;
+    my $output = `./t/00util/test_runner 16 4`;
     chomp($output);
     if ($output =~ /RET:(\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
         my ($ret, $x0, $x1) = ($1, $2, $3);
         ok($ret >= 0, "ADMM - Test 16 (Sparse General Affine QP) status ok");
         my $err = abs($x0 - 0.142857) + abs($x1 - 0.678571);
-        ok($err < 1e-4, "ADMM - Test 16 solution close to analytical solution [0.142857, 0.678571]")
+        ok($err < 1e-4, "ADMM - Test 16 solution close to [0.142857, 0.678571]")
             or diag("Got: x0=$x0, x1=$x1 (err=$err)");
     } else {
         fail("ADMM - Test 16 output format mismatch");
+        fail("ADMM - Test 16 solution check skipped");
     }
 }

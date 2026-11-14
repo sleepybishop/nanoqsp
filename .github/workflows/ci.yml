@@ -7,7 +7,7 @@ on:
     branches: [ main, master ]
 
 jobs:
-  ci-x86-classic:
+  ci-x86:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -15,32 +15,14 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential perl
-    - name: Compile and Run Tests (Classic Scalar)
-      run: make CLASSIC=1 check
-
-  ci-x86-sse:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential perl
-    - name: Compile and Run Tests (SSE3 SIMD)
+    - name: Compile and Run Tests (Runtime SIMD Dispatch + Multi-Backend Sweep)
       run: make check
+    - name: Address and Undefined Behavior Sanitizers
+      run: make check-asan
+    - name: Embedded Freestanding Verification
+      run: make check-embedded
 
-  ci-x86-avx:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential perl
-    - name: Compile and Run Tests (AVX SIMD)
-      run: make AVX=1 check
-
-  ci-arm64-neon:
+  ci-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v6
@@ -48,8 +30,10 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential perl
-    - name: Compile and Run Tests (ARM NEON Native)
-      run: make NEON=1 check
+    - name: Compile and Run Tests (ARM64 NEON)
+      run: make check
+    - name: Embedded Freestanding Verification
+      run: make check-embedded
 
   ci-riscv64-rvv:
     runs-on: ubuntu-latest
@@ -63,4 +47,4 @@ jobs:
       env:
         QEMU_LD_PREFIX: /usr/riscv64-linux-gnu
       run: |
-        make CC=riscv64-linux-gnu-gcc RVV=1 CFLAGS="-Wall -Wextra -O3 -std=c99 -I. -march=rv64gcv -mabi=lp64d" check
+        make CC=riscv64-linux-gnu-gcc CFLAGS="-Wall -Wextra -O3 -std=c99 -march=rv64gcv -mabi=lp64d" check

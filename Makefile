@@ -1,134 +1,98 @@
 .DEFAULT_GOAL := all
 
 CC = gcc
-CFLAGS = -Wall -Wextra -O3 -std=c99 -I. -MMD -MP
+CFLAGS = -Wall -Wextra -O3 -std=c99
 LDFLAGS = -lm
-
-# SIMD configuration
-ifeq ($(CLASSIC), 1)
-  SIMD_BACKEND = classic
-  DEFAULT_SIMD_FLAGS =
-else ifeq ($(AVX), 1)
-  SIMD_BACKEND = avx
-  DEFAULT_SIMD_FLAGS = -DNANOQSP_AVX -mavx
-else ifeq ($(NEON), 1)
-  SIMD_BACKEND = neon
-  DEFAULT_SIMD_FLAGS = -DNANOQSP_NEON
-else ifeq ($(RVV), 1)
-  SIMD_BACKEND = rvv
-  DEFAULT_SIMD_FLAGS = -DNANOQSP_RVV
-else
-  SIMD_BACKEND = sse
-  DEFAULT_SIMD_FLAGS = -DNANOQSP_SSE
-endif
-
-BACKEND_STAMP = .nanoqsp-backend-$(SIMD_BACKEND)
+INCS = -Iinclude -MMD -MP
 
 LIB_NAME = libnanoqsp.a
-OBJS = nanoqsp.o nanoqsp_blas.o
-DEPS = $(OBJS:.o=.d) benchmark.d
-EXAMPLE = example
-TEST_RUNNER = test_runner
-SOLVE_CLI = solve_cli
-BENCHMARK_SPARSE = benchmark_sparse
+
+OBJ = \
+	lib/nanoqsp.o \
+	lib/qsp_blas.o \
+	lib/qsp_box.o \
+	lib/qsp_admm.o
+
+EXAMPLES = \
+	examples/least_squares
+
+TEST_UTILS = \
+	t/00util/test_runner
+
+BENCHMARK = benchmark
+
+PROG_OBJS = \
+	examples/least_squares.o \
+	t/00util/test_runner.o \
+	benchmark.o
+
+DEPS = $(OBJ:.o=.d) $(PROG_OBJS:.o=.d)
 
 -include $(DEPS)
 
-all: $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) $(BENCHMARK_SPARSE)
+all: $(LIB_NAME) $(EXAMPLES) $(TEST_UTILS) $(BENCHMARK)
 
-$(LIB_NAME): $(OBJS)
+$(LIB_NAME): $(OBJ)
 	$(AR) rcs $@ $^
 
-nanoqsp.o: nanoqsp.c $(BACKEND_STAMP)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -c $< -o $@
+lib/%.o: lib/%.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) -c $< -o $@
 
-$(BACKEND_STAMP):
-	$(RM) .nanoqsp-backend-*
-	touch $@
+examples/%.o: examples/%.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) -c $< -o $@
 
-nanoqsp_blas.o: nanoqsp_blas.c $(BACKEND_STAMP)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -c $< -o $@
+t/00util/%.o: t/00util/%.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) -c $< -o $@
 
-$(EXAMPLE): example.c $(LIB_NAME)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -o $@ example.c -L. -lnanoqsp $(LDFLAGS)
-
-$(TEST_RUNNER): t/test_runner.c $(LIB_NAME)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -o $@ t/test_runner.c -L. -lnanoqsp $(LDFLAGS)
-
-$(SOLVE_CLI): solve_cli.c $(LIB_NAME)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFAULT_SIMD_FLAGS) -o $@ solve_cli.c -L. -lnanoqsp $(LDFLAGS)
-
-# Benchmark Targets (Classic vs SSE vs AVX comparison)
 benchmark.o: benchmark.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(INCS) -c $< -o $@
 
-nanoqsp_blas_c.o: nanoqsp_blas.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+examples/least_squares: examples/least_squares.o $(LIB_NAME)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB_NAME) $(LDFLAGS)
 
-nanoqsp_blas_s.o: nanoqsp_blas.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DNANOQSP_SSE -c $< -o $@
+t/00util/test_runner: t/00util/test_runner.o $(LIB_NAME)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB_NAME) $(LDFLAGS)
 
-nanoqsp_blas_a.o: nanoqsp_blas.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DNANOQSP_AVX -mavx -c $< -o $@
+$(BENCHMARK): benchmark.o $(LIB_NAME)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB_NAME) $(LDFLAGS)
 
-bench_classic: benchmark.o nanoqsp.o nanoqsp_blas_c.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
-bench_sse: benchmark.o nanoqsp.o nanoqsp_blas_s.o
-	$(CC) $(CFLAGS) -DNANOQSP_SSE -o $@ $^ $(LDFLAGS)
-
-bench_avx: benchmark.o nanoqsp.o nanoqsp_blas_a.o
-	$(CC) $(CFLAGS) -DNANOQSP_AVX -mavx -o $@ $^ $(LDFLAGS)
-
-bench: bench_classic bench_sse bench_avx
-	@echo "=================================================="
-	@echo "  Running Benchmarks: Classic vs SSE2 vs AVX  "
-	@echo "=================================================="
-	@echo ""
-	./bench_classic 3
-	@echo ""
-	./bench_sse 3
-	@echo ""
-	./bench_avx 3
-	@echo ""
-	@echo "=================================================="
-
-$(BENCHMARK_SPARSE): benchmark_sparse.c $(LIB_NAME)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ benchmark_sparse.c -L. -lnanoqsp $(LDFLAGS)
-
-bench_sparse: $(BENCHMARK_SPARSE)
-	@echo "=================================================="
-	@echo "  Running Benchmarks: Sparse vs Dense Solvers    "
-	@echo "=================================================="
-	@echo ""
-	./$(BENCHMARK_SPARSE) 3
-	@echo ""
-	@echo "=================================================="
+bench: $(BENCHMARK)
+	./$(BENCHMARK)
 
 check: all
 	NANOQSP_CC="$(CC)" \
-	NANOQSP_CPPFLAGS="$(CPPFLAGS)" NANOQSP_CFLAGS="$(CFLAGS)" \
-	NANOQSP_LDFLAGS="$(LDFLAGS)" prove -v t/
+	NANOQSP_CPPFLAGS="$(CPPFLAGS)" \
+	NANOQSP_CFLAGS="$(CFLAGS)" \
+	NANOQSP_LDFLAGS="$(LDFLAGS)" \
+	prove -v t/
 
 check-asan:
 	$(MAKE) clean
-	$(MAKE) check CFLAGS="$(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer" \
-	LDFLAGS="$(LDFLAGS) -fsanitize=address,undefined"
+	$(MAKE) check \
+		CFLAGS="$(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer" \
+		LDFLAGS="$(LDFLAGS) -fsanitize=address,undefined"
 
-check-embedded: clean
+check-embedded:
+	$(MAKE) clean
 	$(MAKE) $(LIB_NAME) CPPFLAGS="$(CPPFLAGS) -DNANOQSP_NO_LIBC"
-	@echo "--- Checking undefined allocator symbols in $(LIB_NAME) ---"
-	@if nm -u $(LIB_NAME) | grep -E '\b(malloc|calloc|realloc|free)\b'; then \
-		echo "FAIL: allocator symbols found in embedded build"; exit 1; \
+	@echo "--- Checking undefined allocator/assert symbols in $(LIB_NAME) ---"
+	@if nm -u $(LIB_NAME) | grep -E '\b(malloc|calloc|realloc|free|posix_memalign|__assert_fail)\b'; then \
+		echo "FAIL: forbidden libc symbols found in embedded build"; exit 1; \
 	else \
-		echo "PASS: no allocator symbols found"; \
+		echo "PASS: no allocator/assert symbols found"; \
+	fi
+	@echo "--- Checking exported symbol namespace in $(LIB_NAME) ---"
+	@if nm -g --defined-only $(LIB_NAME) | awk 'NF >= 2 && $$1 !~ /:$$/ && $$NF !~ /^_?nanoqsp_/ { print; found = 1 } END { exit !found }'; then \
+		echo "FAIL: non-namespaced global symbols exported"; exit 1; \
+	else \
+		echo "PASS: all exported symbols use nanoqsp_ prefix"; \
 	fi
 	$(MAKE) clean
 
 indent:
-	find . -name '*.[h,c]' -not -path './deps/*' | xargs clang-format -i
+	clang-format -i lib/*.c include/*.h examples/*.c t/00util/*.c benchmark.c
 
 clean:
-	$(RM) *.o *.d $(LIB_NAME) $(EXAMPLE) $(TEST_RUNNER) $(SOLVE_CLI) bench_classic bench_sse bench_avx $(BENCHMARK_SPARSE) .nanoqsp-backend-*
+	$(RM) $(OBJ) $(PROG_OBJS) $(DEPS) $(LIB_NAME) $(EXAMPLES) $(TEST_UTILS) $(BENCHMARK)
 
-.PHONY: all clean indent check check-asan check-embedded bench bench_sparse
+.PHONY: all bench check check-asan check-embedded indent clean

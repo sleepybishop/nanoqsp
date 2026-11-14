@@ -1,9 +1,8 @@
 #include "nanoqsp.h"
 #include <stdio.h>
-#include <stdlib.h>
 
 int main(void) {
-  printf("NanoQSP - Complex Least Squares Example\n");
+  printf("NanoQSP - Bounded Least Squares Example\n");
   printf("---------------------------------------\n");
   printf(
       "Scenario: Estimating individual item prices from grocery receipts.\n");
@@ -18,9 +17,7 @@ int main(void) {
 
   double A[] = {5.0, 10.0, 3.0, 0.0, 5.0, 10.0, 0.0, 6.0, 0.0, 10.0, 0.0, 0.0,
                 0.0, 0.0,  3.0, 6.0, 5.0, 0.0,  0.0, 6.0, 5.0, 10.0, 3.0, 6.0};
-
   double b[] = {10.50, 15.00, 5.20, 5.40, 9.50, 15.50};
-
   double lb[] = {0.05, 0.05, 0.05, 0.05};
   double ub[] = {5.00, 5.00, 5.00, 5.00};
 
@@ -41,15 +38,13 @@ int main(void) {
 
     printf("Strategy: %s\n", names[s]);
     if (iters >= 0) {
+      double pred = x[0] + x[1] + x[2] + x[3];
       printf("  Converged in %d iterations.\n", iters);
       printf("  Estimated Item Prices:\n");
       printf("    Apple:  $%.2f\n", x[0]);
       printf("    Banana: $%.2f\n", x[1]);
       printf("    Cherry: $%.2f\n", x[2]);
       printf("    Date:   $%.2f\n", x[3]);
-
-      double test_receipt[] = {1.0, 1.0, 1.0, 1.0};
-      double pred = nanoqsp_predict(n, x, test_receipt);
       printf("  Prediction for 1 of each item: $%.2f\n\n", pred);
     } else {
       printf("  Solver returned error: %d\n\n", iters);
