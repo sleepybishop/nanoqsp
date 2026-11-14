@@ -11,7 +11,7 @@ my @strategy_names = (
     "ADMM"
 );
 
-plan tests => 43;
+plan tests => 45;
 
 for my $s_idx (0 .. $#strategies) {
     my $strat = $strategies[$s_idx];
@@ -85,18 +85,22 @@ for my $case (
     ok($output =~ /RET:0/, "Cross-Strategy Verification - $desc");
 }
 
-{
-    my $output = `./t/00util/test_runner 15 4`;
+for my $aff (
+    [3, "Spectral Projected Gradient"],
+    [4, "ADMM"],
+) {
+    my ($strat, $label) = @$aff;
+    my $output = `./t/00util/test_runner 15 $strat`;
     chomp($output);
     if ($output =~ /RET:(\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
         my ($ret, $x0, $x1) = ($1, $2, $3);
-        ok($ret >= 0, "ADMM - Test 15 (Dense General Affine QP) status ok");
+        ok($ret >= 0, "$label - Test 15 (Dense General Affine QP) status ok");
         my $err = abs($x0 - 0.142857) + abs($x1 - 0.678571);
-        ok($err < 1e-4, "ADMM - Test 15 solution close to [0.142857, 0.678571]")
+        ok($err < 1e-4, "$label - Test 15 solution close to [0.142857, 0.678571]")
             or diag("Got: x0=$x0, x1=$x1 (err=$err)");
     } else {
-        fail("ADMM - Test 15 output format mismatch");
-        fail("ADMM - Test 15 solution check skipped");
+        fail("$label - Test 15 output format mismatch");
+        fail("$label - Test 15 solution check skipped");
     }
 }
 

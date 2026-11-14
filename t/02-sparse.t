@@ -11,7 +11,7 @@ my @strategy_names = (
     "ADMM"
 );
 
-plan tests => 32;
+plan tests => 34;
 
 for my $s_idx (0 .. $#strategies) {
     my $strat = $strategies[$s_idx];
@@ -65,17 +65,21 @@ for my $s_idx (0 .. $#strategies) {
     }
 }
 
-{
-    my $output = `./t/00util/test_runner 16 4`;
+for my $aff (
+    [3, "Spectral Projected Gradient"],
+    [4, "ADMM"],
+) {
+    my ($strat, $label) = @$aff;
+    my $output = `./t/00util/test_runner 16 $strat`;
     chomp($output);
     if ($output =~ /RET:(\d+)\s+X0:([\d\.-]+)\s+X1:([\d\.-]+)/) {
         my ($ret, $x0, $x1) = ($1, $2, $3);
-        ok($ret >= 0, "ADMM - Test 16 (Sparse General Affine QP) status ok");
+        ok($ret >= 0, "$label - Test 16 (Sparse General Affine QP) status ok");
         my $err = abs($x0 - 0.142857) + abs($x1 - 0.678571);
-        ok($err < 1e-4, "ADMM - Test 16 solution close to [0.142857, 0.678571]")
+        ok($err < 1e-4, "$label - Test 16 solution close to [0.142857, 0.678571]")
             or diag("Got: x0=$x0, x1=$x1 (err=$err)");
     } else {
-        fail("ADMM - Test 16 output format mismatch");
-        fail("ADMM - Test 16 solution check skipped");
+        fail("$label - Test 16 output format mismatch");
+        fail("$label - Test 16 solution check skipped");
     }
 }

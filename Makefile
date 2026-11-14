@@ -11,7 +11,8 @@ OBJ = \
 	lib/nanoqsp.o \
 	lib/qsp_blas.o \
 	lib/qsp_box.o \
-	lib/qsp_admm.o
+	lib/qsp_admm.o \
+	lib/qsp_alm.o
 
 EXAMPLES = \
 	examples/least_squares \

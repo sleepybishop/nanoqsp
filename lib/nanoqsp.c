@@ -77,7 +77,7 @@ static int validate_csr(const NanoqspCSR *matrix, int rows, int cols) {
 int nanoqsp_workspace_size_box(int n, NanoqspStrategy strategy) {
   if (!valid_strategy(strategy))
     return NANOQSP_ERR_INVALID_STRATEGY;
-  if (!within_bounds(n, 6))
+  if (!within_bounds(n, 7))
     return NANOQSP_ERR_INVALID_ARG;
   switch (strategy) {
   case NANOQSP_STRATEGY_COORDINATE_DESCENT:
@@ -88,7 +88,7 @@ int nanoqsp_workspace_size_box(int n, NanoqspStrategy strategy) {
   case NANOQSP_STRATEGY_SPECTRAL_GRADIENT:
     return 3 * n;
   case NANOQSP_STRATEGY_ADMM:
-    return 6 * n;
+    return 7 * n;
   }
   return NANOQSP_ERR_INVALID_STRATEGY;
 }
@@ -96,7 +96,7 @@ int nanoqsp_workspace_size_box(int n, NanoqspStrategy strategy) {
 int nanoqsp_workspace_size_box_sparse(int n, NanoqspStrategy strategy) {
   if (!valid_strategy(strategy))
     return NANOQSP_ERR_INVALID_STRATEGY;
-  if (!within_bounds(n, 6))
+  if (!within_bounds(n, 7))
     return NANOQSP_ERR_INVALID_ARG;
   switch (strategy) {
   case NANOQSP_STRATEGY_PROJECTED_GRADIENT:
@@ -107,7 +107,7 @@ int nanoqsp_workspace_size_box_sparse(int n, NanoqspStrategy strategy) {
   case NANOQSP_STRATEGY_SPECTRAL_GRADIENT:
     return 3 * n;
   case NANOQSP_STRATEGY_ADMM:
-    return 6 * n;
+    return 7 * n;
   }
   return NANOQSP_ERR_INVALID_STRATEGY;
 }
@@ -233,7 +233,7 @@ int nanoqsp_solve_box_sparse(int n, const NanoqspCSR *D,
                              const double *restrict lb,
                              const double *restrict ub, double *restrict x,
                              const NanoqspConfig *config) {
-  if (!within_bounds(n, 6) || d == NULL || x == NULL ||
+  if (!within_bounds(n, 7) || d == NULL || x == NULL ||
       !validate_config(config) || !validate_csr(D, n, n) ||
       !validate_bounds(n, lb, ub) || !validate_vector((size_t)n, x) ||
       !validate_vector((size_t)n, d))
@@ -328,6 +328,27 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
   return iters;
 }
 
+static int valid_affine_strategy(NanoqspStrategy strategy) {
+  return strategy == NANOQSP_STRATEGY_ADMM ||
+         strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT;
+}
+
+static int dispatch_affine(const qsp_mat *D, const double *restrict d,
+                           const qsp_mat *A, const double *restrict lb_x,
+                           const double *restrict ub_x,
+                           const double *restrict lb_A,
+                           const double *restrict ub_A, double *restrict x,
+                           NanoqspStrategy strategy, int max_iterations,
+                           double tolerance, qsp_arena *ws) {
+  project_bounds(D->rows, lb_x, ub_x, x);
+  if (strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT) {
+    return nanoqsp_solve_alm_spg(D, d, A, lb_x, ub_x, lb_A, ub_A, x,
+                                 max_iterations, tolerance, ws);
+  }
+  return nanoqsp_solve_admm(D, d, A, lb_x, ub_x, lb_A, ub_A, x, max_iterations,
+                            tolerance, ws);
+}
+
 int nanoqsp_solve_affine(int n, int m, const double *restrict D,
                          const double *restrict d, const double *restrict A,
                          const double *restrict lb_x,
@@ -340,7 +361,9 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
       !validate_bounds(n, lb_x, ub_x) || !validate_bounds(m, lb_A, ub_A) ||
       !validate_vector((size_t)n, x) || !validate_vector((size_t)n, d))
     return NANOQSP_ERR_INVALID_ARG;
-  if (config != NULL && config->strategy != NANOQSP_STRATEGY_ADMM)
+
+  NanoqspStrategy strategy = config ? config->strategy : NANOQSP_STRATEGY_ADMM;
+  if (!valid_affine_strategy(strategy))
     return NANOQSP_ERR_INVALID_STRATEGY;
 
   int required_ws = nanoqsp_workspace_size_affine(n, m);
@@ -358,11 +381,11 @@ int nanoqsp_solve_affine(int n, int m, const double *restrict D,
   if (status < 0)
     return status;
 
-  project_bounds(n, lb_x, ub_x, x);
   qsp_mat mat_D = qsp_mat_dense(n, n, D);
   qsp_mat mat_A = qsp_mat_dense(m, n, A);
-  int iters = nanoqsp_solve_admm(&mat_D, d, m > 0 ? &mat_A : NULL, lb_x, ub_x,
-                                 lb_A, ub_A, x, max_iterations, tolerance, &ws);
+  int iters =
+      dispatch_affine(&mat_D, d, m > 0 ? &mat_A : NULL, lb_x, ub_x, lb_A, ub_A,
+                      x, strategy, max_iterations, tolerance, &ws);
   release_workspace(owned);
   return iters;
 }
@@ -380,7 +403,9 @@ int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
       !validate_bounds(n, lb_x, ub_x) || !validate_bounds(m, lb_A, ub_A) ||
       !validate_vector((size_t)n, x) || !validate_vector((size_t)n, d))
     return NANOQSP_ERR_INVALID_ARG;
-  if (config != NULL && config->strategy != NANOQSP_STRATEGY_ADMM)
+
+  NanoqspStrategy strategy = config ? config->strategy : NANOQSP_STRATEGY_ADMM;
+  if (!valid_affine_strategy(strategy))
     return NANOQSP_ERR_INVALID_STRATEGY;
 
   nanoqsp_blas_init();
@@ -394,11 +419,11 @@ int nanoqsp_solve_affine_sparse(int n, int m, const NanoqspCSR *D,
   if (status < 0)
     return status;
 
-  project_bounds(n, lb_x, ub_x, x);
   qsp_mat mat_D = qsp_mat_csr(n, n, D);
   qsp_mat mat_A = qsp_mat_csr(m, n, A);
-  int iters = nanoqsp_solve_admm(&mat_D, d, m > 0 ? &mat_A : NULL, lb_x, ub_x,
-                                 lb_A, ub_A, x, max_iterations, tolerance, &ws);
+  int iters =
+      dispatch_affine(&mat_D, d, m > 0 ? &mat_A : NULL, lb_x, ub_x, lb_A, ub_A,
+                      x, strategy, max_iterations, tolerance, &ws);
   release_workspace(owned);
   return iters;
 }

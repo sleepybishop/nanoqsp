@@ -49,19 +49,8 @@ int nanoqsp_solve_cd(const qsp_mat *D, const double *restrict d,
   if (!dx || (is_sparse && !diag))
     return NANOQSP_ERR_OUT_OF_MEMORY;
 
-  if (is_sparse) {
-    const NanoqspCSR *S = D->csr;
-    for (int i = 0; i < n; i++) {
-      double d_ii = 0.0;
-      int start = S->row_ptr[i];
-      int end = S->row_ptr[i + 1];
-      for (int idx = start; idx < end; idx++) {
-        if (S->col_indices[idx] == i)
-          d_ii += S->values[idx];
-      }
-      diag[i] = d_ii;
-    }
-  }
+  if (is_sparse)
+    qsp_mat_extract_diag(D, diag);
 
   double d_max = qsp_vec_norm_inf(n, d);
   qsp_mat_vec(D, x, dx);
@@ -394,17 +383,10 @@ int nanoqsp_solve_spg(const qsp_mat *D, const double *restrict d,
     }
     f_hist[(iter + 1) % GLL_WINDOW] = f_curr;
 
-    if (curvature > 0.0) {
-      double spectral_alpha = q_dot_q / curvature;
-      if (spectral_alpha > 0.0 && isfinite(spectral_alpha)) {
-        if (spectral_alpha < 1e-12)
-          spectral_alpha = 1e-12;
-        if (spectral_alpha > 1e12)
-          spectral_alpha = 1e12;
-        alpha = spectral_alpha;
-      } else {
-        alpha = 1.0;
-      }
+    double abs_curv = fabs(curvature);
+    if (abs_curv > 0.0 && isfinite(abs_curv)) {
+      double spectral_alpha = qsp_clamp(q_dot_q / abs_curv, 1e-12, 1e12);
+      alpha = isfinite(spectral_alpha) ? spectral_alpha : 1.0;
     } else if (curvature == 0.0 && slope < 0.0) {
       alpha = alpha * 2.0 < 1e12 ? alpha * 2.0 : 1e12;
     } else {

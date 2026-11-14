@@ -61,27 +61,56 @@ static inline void qsp_mat_vec(const qsp_mat *M, const double *restrict x,
   }
 }
 
-static inline void qsp_mat_tvec(const qsp_mat *M, const double *restrict v,
-                                double *restrict y) {
-  nanoqsp_blas.zero(y, M->cols);
+static inline void qsp_mat_tvec_add(const qsp_mat *M, const double *restrict v,
+                                    double alpha, double *restrict y) {
+  if (alpha == 0.0)
+    return;
   if (M->dense != NULL) {
     for (int i = 0; i < M->rows; i++) {
-      double vi = v[i];
-      if (vi != 0.0)
-        nanoqsp_blas.axpy(y, &M->dense[(size_t)i * (size_t)M->cols], vi,
+      double a = alpha * v[i];
+      if (a != 0.0)
+        nanoqsp_blas.axpy(y, &M->dense[(size_t)i * (size_t)M->cols], a,
                           M->cols);
     }
     return;
   }
   const NanoqspCSR *S = M->csr;
   for (int i = 0; i < M->rows; i++) {
-    double vi = v[i];
-    if (vi == 0.0)
+    double a = alpha * v[i];
+    if (a == 0.0)
       continue;
     int start = S->row_ptr[i];
     int end = S->row_ptr[i + 1];
     for (int idx = start; idx < end; idx++)
-      y[S->col_indices[idx]] += S->values[idx] * vi;
+      y[S->col_indices[idx]] += S->values[idx] * a;
+  }
+}
+
+static inline void qsp_mat_tvec(const qsp_mat *M, const double *restrict v,
+                                double *restrict y) {
+  nanoqsp_blas.zero(y, M->cols);
+  qsp_mat_tvec_add(M, v, 1.0, y);
+}
+
+static inline void qsp_mat_extract_diag(const qsp_mat *D,
+                                        double *restrict diag) {
+  int n = D->rows;
+  if (D->dense != NULL) {
+    size_t stride = (size_t)n;
+    for (int i = 0; i < n; i++)
+      diag[i] = D->dense[(size_t)i * stride + (size_t)i];
+    return;
+  }
+  const NanoqspCSR *S = D->csr;
+  for (int i = 0; i < n; i++) {
+    double d_ii = 0.0;
+    int start = S->row_ptr[i];
+    int end = S->row_ptr[i + 1];
+    for (int idx = start; idx < end; idx++) {
+      if (S->col_indices[idx] == i)
+        d_ii += S->values[idx];
+    }
+    diag[i] = d_ii;
   }
 }
 
@@ -167,5 +196,12 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
                        const double *restrict ub_x, const double *restrict lb_A,
                        const double *restrict ub_A, double *restrict x,
                        int max_iter, double tol, qsp_arena *ws);
+
+int nanoqsp_solve_alm_spg(const qsp_mat *D, const double *restrict d,
+                          const qsp_mat *A, const double *restrict lb_x,
+                          const double *restrict ub_x,
+                          const double *restrict lb_A,
+                          const double *restrict ub_A, double *restrict x,
+                          int max_iter, double tol, qsp_arena *ws);
 
 #endif /* QSP_INTERNAL_H */

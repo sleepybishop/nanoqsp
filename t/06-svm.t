@@ -88,7 +88,7 @@ my $output = File::Spec->catfile($root, "predictions");
 write_file($data, $SIMPLE);
 for my $solver (0, 1) {
     for my $kernel (0, 1) {
-        my @strats = $solver == 0 ? (0 .. 4) : (4);
+        my @strats = $solver == 0 ? (0 .. 4) : (3, 4);
         for my $strat (@strats) {
             my $tag = "s=$solver t=$kernel m=$strat";
             my ($stdout) = run_cmd(

@@ -36,13 +36,12 @@ static void print_usage(const char *prog) {
   printf("Options:\n");
   printf("  -s solver   : 0 -- Box QP (default, fast regularized bias)\n");
   printf(
-      "                1 -- Affine QP (ADMM with equality constraint sum y_i "
-      "alpha_i = 0)\n");
+      "                1 -- Affine QP (equality constraint sum y_i alpha_i = "
+      "0)\n");
   printf("  -t kernel   : 0 -- Linear (default)\n");
   printf("                1 -- RBF (exp(-gamma * |u-v|^2))\n");
-  printf(
-      "  -m strategy : nanoqsp strategy for box solver (0: CD, 1: PG, 2: AG, "
-      "3: SPG, 4: ADMM)\n");
+  printf("  -m strategy : nanoqsp strategy (0: CD, 1: PG, 2: AG, 3: SPG, 4: "
+         "ADMM)\n");
   printf("  -c cost     : set the parameter C (default 1.0)\n");
   printf("  -g gamma    : set gamma in kernel function (default "
          "1/num_features)\n");

@@ -48,7 +48,7 @@ for my $hdr (qw(include/nanoqsp.h include/qsp_arena.h include/qsp_blas.h
     write_file("$fixture/$hdr", "/* header fixture */\n");
 }
 for my $source (qw(lib/nanoqsp.c lib/qsp_blas.c lib/qsp_box.c lib/qsp_admm.c
-                   examples/least_squares.c examples/svm/svm.c
+                   lib/qsp_alm.c examples/least_squares.c examples/svm/svm.c
                    examples/svm/svm_train.c examples/svm/svm_predict.c
                    t/00util/test_runner.c benchmark.c)) {
     write_file("$fixture/$source", "/* source fixture */\n");
@@ -109,9 +109,9 @@ use strict;
 use warnings;
 die 'check ran before cleanup finished' unless -e '.clean-complete';
 for my $path (qw(lib/nanoqsp.o lib/qsp_blas.o lib/qsp_box.o lib/qsp_admm.o
-                 libnanoqsp.a examples/least_squares examples/svm/svm.o
-                 examples/svm/svm_train examples/svm/svm_predict
-                 t/00util/test_runner benchmark)) {
+                 lib/qsp_alm.o libnanoqsp.a examples/least_squares
+                 examples/svm/svm.o examples/svm/svm_train
+                 examples/svm/svm_predict t/00util/test_runner benchmark)) {
     open my $file, '<', $path or die "$path: $!";
     local $/;
     my $flags = <$file>;

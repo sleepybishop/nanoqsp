@@ -99,7 +99,7 @@ int nanoqsp_solve_least_squares(int m, int n, const double *NANOQSP_RESTRICT A,
                                 const NanoqspConfig *config);
 
 /*
- * solve dense QP with box and general linear constraints via ADMM:
+ * solve dense QP with box and general linear constraints (ADMM or SPG):
  *   minimize    0.5 * x^T D x - d^T x
  *   subject to  lb_x <= x <= ub_x
  *               lb_A <= A x <= ub_A

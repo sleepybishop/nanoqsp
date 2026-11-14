@@ -401,7 +401,9 @@ SvmModel *svm_train(const SvmProblem *prob, const SvmParam *param) {
     status = nanoqsp_solve_box(l, D, d_vec, lb, ub, alpha, &config);
   } else {
     /* affine equality constraint: sum y_i alpha_i = 0 */
-    config.strategy = NANOQSP_STRATEGY_ADMM;
+    config.strategy = (eff_param.strategy == NANOQSP_STRATEGY_SPECTRAL_GRADIENT)
+                          ? NANOQSP_STRATEGY_SPECTRAL_GRADIENT
+                          : NANOQSP_STRATEGY_ADMM;
     double zero = 0.0;
     status = nanoqsp_solve_affine(l, 1, D, d_vec, y_bin, lb, ub, &zero, &zero,
                                   alpha, &config);
