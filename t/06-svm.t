@@ -367,4 +367,77 @@ for my $bad_args (
     ok(!-e $model, "no model written for invalid param ($label)");
 }
 
+# 18. non-support outliers must not regularize ordinary support vectors
+write_file($data, "1 1:2\n1 1:10\n-1 1:1\n-1 1:-1\n1 1:100000\n-1 1:-100000\n");
+for my $solver (0, 1) {
+    run_cmd(
+        [$TRAIN, "-s", $solver, "-c", 10, "-e", "1e-9", "-i", 100000, $data, $model],
+        1, "mixed-norm linear train s=$solver"
+    );
+    run_cmd([$PREDICT, $data, $model, $output], 1, "mixed-norm linear predict s=$solver");
+    my @preds = parse_predictions($output);
+    check_labels(\@preds, [1, 1, -1, -1, 1, -1], "mixed-norm linear s=$solver");
+    # Both C=10 formulations have the separator w=2, b=-3. The extreme
+    # samples satisfy its margin and should not affect the four ordinary rows.
+    my @expected = (1, 17, -1, -5);
+    for my $i (0 .. $#expected) {
+        ok(abs($preds[$i][1] - $expected[$i]) < 1e-3,
+           "mixed-norm linear margin s=$solver row=$i")
+            or diag("got margin $preds[$i][1], expected $expected[$i]");
+    }
+}
+
+# A zero row must not inherit the large diagonal scale of every other row.
+write_file($data, "-1\n1 1:2 2:100000\n1 1:2 2:-100000\n");
+run_cmd(
+    [$TRAIN, "-s", 1, "-m", 3, "-c", 10, "-e", "1e-7", "-i", 100000, $data, $model],
+    1, "zero-row mixed-norm affine train"
+);
+run_cmd([$PREDICT, $data, $model, $output], 1, "zero-row mixed-norm affine predict");
+my @zero_row_preds = parse_predictions($output);
+check_labels(\@zero_row_preds, [-1, 1, 1], "zero-row mixed-norm affine");
+
+# Diagonal jitter overflow near DBL_MAX must fail cleanly rather than emit NaN.
+write_file($data, "1 1:1.3407807929942596e154\n-1\n");
+for my $solver (0, 1) {
+    unlink $model;
+    run_cmd([$TRAIN, "-s", $solver, "-b", 0, $data, $model], 0,
+            "reject diagonal jitter overflow s=$solver");
+    ok(!-e $model, "no model written on diagonal jitter overflow s=$solver");
+}
+
+# 19. gamma compensates extreme coordinates before the distance is squared
+for my $case (
+    ["1e-310", "1:0", "1:1e155", 1],
+    ["1e-310", "1:1e155 3:1e155", "2:1e155", 3],
+    ["1e308", "1:0", "1:1e-154", 1],
+) {
+    my ($gamma, $sv, $x, $exponent) = @$case;
+    write_file(
+        $model,
+        "solver 0\nkernel 1\ngamma $gamma\nbias -0.01\nlabels 1 -1\n" .
+        "nr_sv 1\nmax_dim 3\nSV\n1 $sv\n"
+    );
+    write_file($data, "1 $x\n");
+    run_cmd([$PREDICT, $data, $model, $output], 1, "scaled RBF predict gamma=$gamma x=$x");
+    my @preds = parse_predictions($output);
+    check_labels(\@preds, [1], "scaled RBF gamma=$gamma x=$x");
+    ok(abs($preds[0][1] - (exp(-$exponent) - 0.01)) < 1e-12,
+       "scaled RBF decision gamma=$gamma x=$x");
+}
+
+write_file($data, "1 1:1e155\n-1 1:-1e155\n");
+for my $solver (0, 1) {
+    run_cmd(
+        [$TRAIN, "-s", $solver, "-t", 1, "-g", "1e-310", "-e", "1e-9", $data, $model],
+        1, "scaled RBF train s=$solver"
+    );
+    run_cmd([$PREDICT, $data, $model, $output], 1, "scaled RBF roundtrip s=$solver");
+    my @preds = parse_predictions($output);
+    check_labels(\@preds, [1, -1], "scaled RBF roundtrip s=$solver");
+    my $margin = 1 - exp(-4);
+    ok(abs($preds[0][1] - $margin) < 1e-6 && abs($preds[1][1] + $margin) < 1e-6,
+       "scaled RBF training margins s=$solver");
+}
+
 done_testing();

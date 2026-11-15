@@ -317,7 +317,7 @@ int nanoqsp_solve_least_squares(int m, int n, const double *restrict A,
   }
 
   qsp_mat mat_D = qsp_mat_dense(n, n, D);
-  double norm_inf = qsp_mat_norm_inf(&mat_D);
+  double norm_inf = qsp_mat_norm_inf(&mat_D, NULL);
   double epsilon = (norm_inf > 0.0) ? (norm_inf * 1e-8) : 1e-8;
   for (int i = 0; i < n; i++)
     D[(size_t)i * stride + (size_t)i] += epsilon;

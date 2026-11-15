@@ -51,5 +51,14 @@ for my $case ([61, 'SPG: dense non-convex [0,1] negative-curvature clique QP'],
     my ($id, $name) = @$case;
     like(`./t/00util/test_runner $id 3`, qr/RET:0\b/, $name);
 }
+for my $id (63, 64) {
+    my $storage = $id == 63 ? 'dense' : 'sparse';
+    like(`./t/00util/test_runner $id 4`, qr/RET:0\b/,
+         "ADMM: $storage penalty adaptation converges without cycling");
+}
+for my $s (3, 4) {
+    like(`./t/00util/test_runner 65 $s`, qr/RET:0\b/,
+         "$strategies[$s]: affine CSR duplicates preserve convergence");
+}
 
 done_testing();

@@ -4,7 +4,8 @@
 static void qsp_admm_update_precond(const qsp_mat *D, const qsp_mat *A,
                                     double rho, double sigma_A,
                                     const double *restrict w_x,
-                                    double *restrict inv_diag) {
+                                    double *restrict inv_diag,
+                                    double *restrict scratch) {
   int n = D->rows;
   int m = A ? A->rows : 0;
 
@@ -15,22 +16,7 @@ static void qsp_admm_update_precond(const qsp_mat *D, const qsp_mat *A,
   if (A != NULL && m > 0 && rho > 0.0 && sigma_A > 0.0) {
     double factor = sqrt(rho) / sigma_A;
     if (factor > 0.0 && isfinite(factor)) {
-      if (A->dense != NULL) {
-        size_t stride = (size_t)n;
-        for (int j = 0; j < m; j++) {
-          const double *restrict row = &A->dense[(size_t)j * stride];
-          for (int i = 0; i < n; i++) {
-            double t = factor * row[i];
-            inv_diag[i] += t * t;
-          }
-        }
-      } else {
-        const NanoqspCSR *S = A->csr;
-        for (int idx = 0; idx < S->nnz; idx++) {
-          double t = factor * S->values[idx];
-          inv_diag[S->col_indices[idx]] += t * t;
-        }
-      }
+      qsp_mat_add_gram_diag(A, factor, inv_diag, scratch);
     }
   }
 
@@ -267,50 +253,13 @@ static int qsp_solve_unconstrained_pcg(
 /* compute RMS row norm of A in equilibrated w_x coordinates without overflow */
 static int qsp_equilibrated_a_scale(const qsp_mat *A,
                                     const double *restrict inv_sqrt_wx,
-                                    double *out_sigma_A) {
-  int n = A->cols;
+                                    double *out_sigma_A,
+                                    double *restrict scratch) {
   int m = A->rows;
-  double scale = 0.0;
-  double sum_sq = 1.0;
-
-  if (A->dense != NULL) {
-    size_t stride = (size_t)n;
-    for (int j = 0; j < m; j++) {
-      const double *restrict row = &A->dense[(size_t)j * stride];
-      for (int i = 0; i < n; i++) {
-        double a = fabs(row[i]) * inv_sqrt_wx[i];
-        if (!isfinite(a))
-          return 0;
-        if (a == 0.0)
-          continue;
-        if (a > scale) {
-          double ratio = scale / a;
-          sum_sq = (scale == 0.0) ? 1.0 : (1.0 + sum_sq * ratio * ratio);
-          scale = a;
-        } else {
-          double ratio = a / scale;
-          sum_sq += ratio * ratio;
-        }
-      }
-    }
-  } else {
-    const NanoqspCSR *S = A->csr;
-    for (int idx = 0; idx < S->nnz; idx++) {
-      double a = fabs(S->values[idx]) * inv_sqrt_wx[S->col_indices[idx]];
-      if (!isfinite(a))
-        return 0;
-      if (a == 0.0)
-        continue;
-      if (a > scale) {
-        double ratio = scale / a;
-        sum_sq = (scale == 0.0) ? 1.0 : (1.0 + sum_sq * ratio * ratio);
-        scale = a;
-      } else {
-        double ratio = a / scale;
-        sum_sq += ratio * ratio;
-      }
-    }
-  }
+  double sum_sq = 0.0;
+  double scale = qsp_mat_scaled_fro(A, inv_sqrt_wx, &sum_sq, scratch);
+  if (!isfinite(scale) || !isfinite(sum_sq))
+    return 0;
 
   double sigma = 1.0;
   if (scale > 0.0 && sum_sq > 0.0) {
@@ -331,10 +280,6 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
   int m = A ? A->rows : 0;
   int has_A = (A != NULL && m > 0);
 
-  double d_norm_inf = qsp_mat_norm_inf(D);
-  if (!isfinite(d_norm_inf))
-    return NANOQSP_ERR_MAX_ITERATIONS;
-
   double d_max = qsp_vec_norm_inf(n, d);
   int unconstrained = !has_A;
   if (unconstrained && (lb_x != NULL || ub_x != NULL)) {
@@ -352,6 +297,8 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
     double *restrict Ap = qsp_arena_take(ws, n);
     if (!inv_diag || !r || !p || !Ap)
       return NANOQSP_ERR_OUT_OF_MEMORY;
+    if (!isfinite(qsp_mat_norm_inf(D, Ap)))
+      return NANOQSP_ERR_MAX_ITERATIONS;
     return qsp_solve_unconstrained_pcg(D, d, x, d_max, max_iter, tol, inv_diag,
                                        r, p, Ap);
   }
@@ -366,6 +313,10 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
   double *restrict Ax = m > 0 ? qsp_arena_take(ws, m) : NULL;
   if (!z || !y || !w_x || !inv_diag || !r || !p || !Ap || (m > 0 && !Ax))
     return NANOQSP_ERR_OUT_OF_MEMORY;
+
+  double d_norm_inf = qsp_mat_norm_inf(D, Ap);
+  if (!isfinite(d_norm_inf))
+    return NANOQSP_ERR_MAX_ITERATIONS;
 
   /* seed rho and per-coordinate diagonal weights from D */
   qsp_mat_extract_diag(D, r);
@@ -403,10 +354,10 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
   }
 
   double sigma_A = 1.0;
-  if (has_A && !qsp_equilibrated_a_scale(A, p, &sigma_A))
+  if (has_A && !qsp_equilibrated_a_scale(A, p, &sigma_A, Ap))
     return NANOQSP_ERR_MAX_ITERATIONS;
 
-  qsp_admm_update_precond(D, A, rho, sigma_A, w_x, inv_diag);
+  qsp_admm_update_precond(D, A, rho, sigma_A, w_x, inv_diag, Ap);
 
   nanoqsp_blas.copy(z, x, n);
   if (has_A)
@@ -422,6 +373,8 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
       isfinite(rho_hi_base * 1e6) ? (rho_hi_base * 1e6) : rho_hi_base;
   double cg_tol = 0.05 * tol * init_scale;
   double cg_xtol = 0.05 * tol;
+  double last_reversal_merit = INFINITY;
+  int adapt_direction = 0;
 
   for (int iter = 0; iter < max_iter; iter++) {
     qsp_cg_solve(D, A, rho, sigma_A, cg_tol, cg_xtol, iter == 0, w_x, inv_diag,
@@ -556,6 +509,11 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
       double r_d = rel_dual_kkt > 0.0 ? rel_dual_kkt : rel_prim;
       double rel_min = r_p < r_d ? r_p : r_d;
       double rel_target = 0.15 * rel_min;
+      /* summable cap prevents persistent inner error on outer stagnation */
+      double age = iter + 1.0;
+      double rel_cap = 0.1 / (age * age);
+      if (rel_target > rel_cap)
+        rel_target = rel_cap;
       double rel_floor = 0.05 * tol;
       if (rel_target < rel_floor)
         rel_target = rel_floor;
@@ -563,7 +521,8 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
       cg_xtol = rel_target * box_scale;
     }
 
-    /* OSQP-style proportional penalty adaptation in equilibrated norms */
+    /* require geometric KKT progress between reversals of penalty adaptation */
+    double merit = rel_prim > rel_dual_kkt ? rel_prim : rel_dual_kkt;
     if (!nonfinite_found && adapt_step) {
       double eq_box_prim = 0.0;
       double eq_box_norm = 0.0;
@@ -602,17 +561,24 @@ int nanoqsp_solve_admm(const qsp_mat *D, const double *restrict d,
         new_rho = qsp_clamp(rho * factor, rho_min, rho_max);
       }
       if (new_rho > 0.0 && isfinite(new_rho) && new_rho != rho) {
-        double mult_scale = rho / new_rho;
-        int can_rescale = 1;
-        for (int i = 0; i < n + m; i++) {
-          if (!isfinite(y[i] * mult_scale))
-            can_rescale = 0;
-        }
-        if (can_rescale) {
-          for (int i = 0; i < n + m; i++)
-            y[i] *= mult_scale;
-          rho = new_rho;
-          qsp_admm_update_precond(D, A, rho, sigma_A, w_x, inv_diag);
+        int direction = new_rho > rho ? 1 : -1;
+        if (adapt_direction == 0 || direction == adapt_direction ||
+            merit <= 0.5 * last_reversal_merit) {
+          double mult_scale = rho / new_rho;
+          int can_rescale = 1;
+          for (int i = 0; i < n + m; i++) {
+            if (!isfinite(y[i] * mult_scale))
+              can_rescale = 0;
+          }
+          if (can_rescale) {
+            for (int i = 0; i < n + m; i++)
+              y[i] *= mult_scale;
+            rho = new_rho;
+            if (adapt_direction != 0 && direction != adapt_direction)
+              last_reversal_merit = merit;
+            adapt_direction = direction;
+            qsp_admm_update_precond(D, A, rho, sigma_A, w_x, inv_diag, Ap);
+          }
         }
       }
     }

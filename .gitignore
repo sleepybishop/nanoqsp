@@ -17,4 +17,5 @@ examples/svm/svm_predict
 t/00util/*.o
 t/00util/*.d
 t/00util/test_runner
+t/00util/test_box_regressions
 benchmark

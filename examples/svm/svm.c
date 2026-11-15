@@ -109,39 +109,44 @@ static double dot_sparse(const SvmNode *px, const SvmNode *py) {
   return sum;
 }
 
-static double norm_sq_sparse(const SvmNode *px) {
+static double norm_sq_sparse(const SvmNode *px, double scale) {
   double sum = 0.0;
   while (px->index != -1) {
-    sum += px->value * px->value;
+    double value = scale * px->value;
+    sum += value * value;
     px++;
   }
   return sum;
 }
 
-static double distance_sq_sparse(const SvmNode *px, const SvmNode *py) {
+static double distance_sq_sparse(const SvmNode *px, const SvmNode *py,
+                                 double scale) {
   double sum = 0.0;
   while (px->index != -1 && py->index != -1) {
     if (px->index == py->index) {
-      double diff = px->value - py->value;
+      double diff = scale * (px->value - py->value);
       sum += diff * diff;
       px++;
       py++;
     } else if (px->index > py->index) {
-      sum += py->value * py->value;
+      double value = scale * py->value;
+      sum += value * value;
       py++;
     } else {
-      sum += px->value * px->value;
+      double value = scale * px->value;
+      sum += value * value;
       px++;
     }
   }
-  return sum + norm_sq_sparse(px) + norm_sq_sparse(py);
+  return sum + norm_sq_sparse(px, scale) + norm_sq_sparse(py, scale);
 }
 
 static double kernel_eval(const SvmNode *x1, const SvmNode *x2,
                           const SvmParam *param) {
   if (param->kernel == SVM_KERNEL_RBF) {
-    double dist_sq = distance_sq_sparse(x1, x2);
-    return exp(-param->gamma * dist_sq);
+    /* subtract first, then scale by sqrt(gamma) before squaring */
+    double dist_sq = distance_sq_sparse(x1, x2, sqrt(param->gamma));
+    return exp(-dist_sq);
   }
   return dot_sparse(x1, x2);
 }
@@ -363,7 +368,7 @@ SvmModel *svm_train(const SvmProblem *prob, const SvmParam *param) {
     bias_sq = eff_param.bias * eff_param.bias;
   }
 
-  double max_diag = 0.0;
+  double min_diag = 0.0;
   for (int i = 0; i < l; i++) {
     for (int j = i; j < l; j++) {
       double k_val = kernel_eval(prob->x[i], prob->x[j], &eff_param) + bias_sq;
@@ -381,14 +386,27 @@ SvmModel *svm_train(const SvmProblem *prob, const SvmParam *param) {
       D[(size_t)j * (size_t)l + (size_t)i] = q_ij;
     }
     double diag_i = D[(size_t)i * (size_t)l + (size_t)i];
-    if (diag_i > max_diag)
-      max_diag = diag_i;
+    if (diag_i > 0.0 && (min_diag == 0.0 || diag_i < min_diag))
+      min_diag = diag_i;
   }
 
-  /* relative diagonal jitter ensures strict SPD across kernel scales */
-  double jitter = (max_diag > 0.0) ? (1e-9 * max_diag) : 1e-9;
-  for (int i = 0; i < l; i++)
-    D[(size_t)i * (size_t)l + (size_t)i] += jitter;
+  /* regularize each diagonal on its own scale to isolate outlier norms */
+  if (min_diag == 0.0)
+    min_diag = 1.0;
+  double zero_diag_scale = fmin(min_diag, 1.0);
+  for (int i = 0; i < l; i++) {
+    double *diag = &D[(size_t)i * (size_t)l + (size_t)i];
+    *diag += 1e-9 * (*diag > 0.0 ? *diag : zero_diag_scale);
+    if (!isfinite(*diag)) {
+      free(y_bin);
+      free(D);
+      free(d_vec);
+      free(lb);
+      free(ub);
+      free(alpha);
+      return NULL;
+    }
+  }
 
   NanoqspConfig config;
   memset(&config, 0, sizeof(config));
@@ -470,8 +488,10 @@ SvmModel *svm_train(const SvmProblem *prob, const SvmParam *param) {
     double tol_hi = 1e-4 * eff_param.C;
 
     for (int i = 0; i < l; i++) {
-      double d_alpha_i = -jitter * alpha[i];
       const double *D_row = &D[(size_t)i * (size_t)l];
+      double unregularized_diag =
+          kernel_eval(prob->x[i], prob->x[i], &eff_param);
+      double d_alpha_i = (unregularized_diag - D_row[i]) * alpha[i];
       for (int j = 0; j < l; j++) {
         d_alpha_i += D_row[j] * alpha[j];
       }

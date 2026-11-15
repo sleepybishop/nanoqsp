@@ -10,7 +10,7 @@ int nanoqsp_check_kkt(int n, const double *restrict dx,
   for (int i = 0; i < n; i++) {
     double dx_i = dx[i];
     double grad_i = dx_i - d[i];
-    if (isnan(grad_i))
+    if (!isfinite(grad_i) || !isfinite(x[i]))
       return 0;
     double lower = lb ? lb[i] : -INFINITY;
     double upper = ub ? ub[i] : INFINITY;
@@ -113,9 +113,11 @@ int nanoqsp_solve_cd(const qsp_mat *D, const double *restrict d,
     }
 
     int small_step = (max_diff < tol * (1.0 + x_max));
-    if (small_step || (iter + 1) % 64 == 0) {
+    int last_iteration = (iter == max_iter - 1);
+    if (small_step || last_iteration || (iter + 1) % 64 == 0) {
       qsp_mat_vec(D, x, dx);
-      if (small_step && nanoqsp_check_kkt(n, dx, d, lb, ub, x, d_max, tol))
+      if ((small_step || last_iteration) &&
+          nanoqsp_check_kkt(n, dx, d, lb, ub, x, d_max, tol))
         return iter + 1;
     }
   }
@@ -132,7 +134,7 @@ int nanoqsp_solve_pg(const qsp_mat *D, const double *restrict d,
   if (!dx)
     return NANOQSP_ERR_OUT_OF_MEMORY;
 
-  double norm_inf = qsp_mat_norm_inf(D);
+  double norm_inf = qsp_mat_norm_inf(D, dx);
   double d_max = qsp_vec_norm_inf(n, d);
   double matrix_scale = norm_inf > 0.0 ? norm_inf : (d_max > 0.0 ? d_max : 1.0);
 
@@ -165,7 +167,7 @@ int nanoqsp_solve_fista(const qsp_mat *D, const double *restrict d,
   if (!y || !next_x)
     return NANOQSP_ERR_OUT_OF_MEMORY;
 
-  double norm_inf = qsp_mat_norm_inf(D);
+  double norm_inf = qsp_mat_norm_inf(D, next_x);
   double d_max = qsp_vec_norm_inf(n, d);
   double matrix_scale = norm_inf > 0.0 ? norm_inf : (d_max > 0.0 ? d_max : 1.0);
 
@@ -272,7 +274,7 @@ int nanoqsp_solve_spg(const qsp_mat *D, const double *restrict d,
   if (!q || !dx || !dq)
     return NANOQSP_ERR_OUT_OF_MEMORY;
 
-  double norm_inf = qsp_mat_norm_inf(D);
+  double norm_inf = qsp_mat_norm_inf(D, dx);
   double matrix_scale = norm_inf > 0.0 ? norm_inf : 1.0;
   double alpha = 1.0;
   double d_max = qsp_vec_norm_inf(n, d);

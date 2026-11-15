@@ -1,6 +1,5 @@
 #include "qsp_internal.h"
 #include <float.h>
-
 /* evaluate affine ALM state, exact global KKT residuals, and inner gradient */
 static double qsp_alm_eval_state(
     int n, int m, const double *restrict x, const double *restrict x_prox,
@@ -162,31 +161,16 @@ qsp_alm_line_eval(int m, const double *restrict ax, const double *restrict aq,
 /* build diagonal curvature preconditioner for inner box SPG */
 static void qsp_alm_update_diag(const qsp_mat *D, const qsp_mat *A, double mu,
                                 double sigma, double sigma_A, double fallback,
-                                double *restrict w_diag) {
+                                double *restrict w_diag,
+                                double *restrict scratch) {
   int n = D->rows;
-  int m = A->rows;
   qsp_mat_extract_diag(D, w_diag);
   for (int i = 0; i < n; i++)
     w_diag[i] = fabs(w_diag[i]) + sigma;
 
   double factor = sqrt(mu) / sigma_A;
   if (factor > 0.0 && isfinite(factor)) {
-    if (A->dense != NULL) {
-      size_t stride = (size_t)n;
-      for (int j = 0; j < m; j++) {
-        const double *restrict row = &A->dense[(size_t)j * stride];
-        for (int i = 0; i < n; i++) {
-          double t = factor * row[i];
-          w_diag[i] += t * t;
-        }
-      }
-    } else {
-      const NanoqspCSR *S = A->csr;
-      for (int idx = 0; idx < S->nnz; idx++) {
-        double t = factor * S->values[idx];
-        w_diag[S->col_indices[idx]] += t * t;
-      }
-    }
+    qsp_mat_add_gram_diag(A, factor, w_diag, scratch);
   }
 
   for (int i = 0; i < n; i++) {
@@ -208,12 +192,6 @@ int nanoqsp_solve_alm_spg(const qsp_mat *D, const double *restrict d,
   if (A == NULL || m <= 0)
     return nanoqsp_solve_spg(D, d, lb_x, ub_x, x, max_iter, tol, ws);
 
-  double d_norm_inf = qsp_mat_norm_inf(D);
-  double a_sum_sq = 0.0;
-  double a_scale_raw = qsp_mat_scaled_fro(A, &a_sum_sq);
-  if (!isfinite(d_norm_inf) || !isfinite(a_scale_raw) || !isfinite(a_sum_sq))
-    return NANOQSP_ERR_MAX_ITERATIONS;
-
   double *restrict dx = qsp_arena_take(ws, n);
   double *restrict g = qsp_arena_take(ws, n);
   double *restrict q = qsp_arena_take(ws, n);
@@ -225,6 +203,12 @@ int nanoqsp_solve_alm_spg(const qsp_mat *D, const double *restrict d,
   double *restrict aq = qsp_arena_take(ws, m);
   if (!dx || !g || !q || !dq || !x_prox || !w_diag || !bar_y || !ax || !aq)
     return NANOQSP_ERR_OUT_OF_MEMORY;
+
+  double d_norm_inf = qsp_mat_norm_inf(D, q);
+  double a_sum_sq = 0.0;
+  double a_scale_raw = qsp_mat_scaled_fro(A, NULL, &a_sum_sq, q);
+  if (!isfinite(d_norm_inf) || !isfinite(a_scale_raw) || !isfinite(a_sum_sq))
+    return NANOQSP_ERR_MAX_ITERATIONS;
 
   double sigma_A = 1.0;
   if (a_scale_raw > 0.0 && a_sum_sq > 0.0) {
@@ -281,7 +265,7 @@ int nanoqsp_solve_alm_spg(const qsp_mat *D, const double *restrict d,
     double eff_scale = (d_norm_inf + mu > 0.0 && isfinite(d_norm_inf + mu))
                            ? (d_norm_inf + mu)
                            : 1.0;
-    qsp_alm_update_diag(D, A, mu, sigma, sigma_A, eff_scale, w_diag);
+    qsp_alm_update_diag(D, A, mu, sigma, sigma_A, eff_scale, w_diag, q);
     double alpha = 1.0;
     double f_hist[GLL_WINDOW];
     int hist_count = 0;

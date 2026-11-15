@@ -8,7 +8,7 @@
 #define QSP_ARCH_X86 1
 #include <immintrin.h>
 #endif
-#elif defined(__aarch64__) || defined(_M_ARM64) || defined(__ARM_NEON)
+#elif (defined(__aarch64__) && defined(__ARM_NEON)) || defined(_M_ARM64)
 #define QSP_ARCH_NEON 1
 #include <arm_neon.h>
 #elif defined(__riscv) && defined(__riscv_vector)

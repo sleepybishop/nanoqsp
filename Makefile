@@ -20,7 +20,8 @@ EXAMPLES = \
 	examples/svm/svm_predict
 
 TEST_UTILS = \
-	t/00util/test_runner
+	t/00util/test_runner \
+	t/00util/test_box_regressions
 
 BENCHMARK = benchmark
 
@@ -30,6 +31,7 @@ PROG_OBJS = \
 	examples/svm/svm_train.o \
 	examples/svm/svm_predict.o \
 	t/00util/test_runner.o \
+	t/00util/test_box_regressions.o \
 	benchmark.o
 
 DEPS = $(OBJ:.o=.d) $(PROG_OBJS:.o=.d)
@@ -66,6 +68,9 @@ examples/svm/svm_predict: examples/svm/svm_predict.o examples/svm/svm.o $(LIB_NA
 	$(CC) $(CFLAGS) -o $@ examples/svm/svm_predict.o examples/svm/svm.o $(LIB_NAME) $(LDFLAGS)
 
 t/00util/test_runner: t/00util/test_runner.o $(LIB_NAME)
+	$(CC) $(CFLAGS) -o $@ $< $(LIB_NAME) $(LDFLAGS)
+
+t/00util/test_box_regressions: t/00util/test_box_regressions.o $(LIB_NAME)
 	$(CC) $(CFLAGS) -o $@ $< $(LIB_NAME) $(LDFLAGS)
 
 $(BENCHMARK): benchmark.o $(LIB_NAME)

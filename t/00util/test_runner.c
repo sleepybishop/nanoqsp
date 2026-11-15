@@ -889,6 +889,70 @@ static int run_numerical_test(int test_id, int strategy_id, double *x) {
     x[1] = sol[4];
     return 0;
   }
+  if (test_id == 63 || test_id == 64) {
+    /* residual balancing must not repeatedly reverse ADMM penalty */
+    const double curv[] = {1.0, 0.1};
+    const double linear[] = {3.0, 0.3};
+    const double rows[][2] = {{2.0, 0.25}, {1.7, 0.3}};
+    const double lowers[][2] = {{-2.0, -1.0}, {-1.5, -0.4}};
+    const double uppers[][2] = {{1.0, 0.025}, {1.1, 0.03}};
+    double lb[] = {-1.0}, ub[] = {1.0}, expected[] = {0.1};
+    const int cols[] = {0, 0}, ptr[] = {0, 1, 2};
+    double workspace[13];
+    config.workspace = workspace;
+    config.workspace_size = 13;
+    for (int k = 0; k < 2; k++) {
+      x[0] = 0.0;
+      const NanoqspCSR csr_D = {1, 1, &curv[k], cols, ptr};
+      const NanoqspCSR csr_A = {2, 2, rows[k], cols, ptr};
+      int ret =
+          sparse ? nanoqsp_solve_affine_sparse(1, 2, &csr_D, &linear[k], &csr_A,
+                                               lb, ub, lowers[k], uppers[k], x,
+                                               &config)
+                 : nanoqsp_solve_affine(1, 2, &curv[k], &linear[k], rows[k], lb,
+                                        ub, lowers[k], uppers[k], x, &config);
+      if (numerical_solution(ret, 1, x, expected, 1e-7))
+        return -10;
+    }
+    return 0;
+  }
+  if (test_id == 65) {
+    /* unsorted duplicates and exact cancellation represent the same A */
+    const double D[] = {2.0, 0.2, 0.2, 1.0}, d[] = {0.5, 0.2};
+    const double A[] = {1.0, 2.0, 0.0, 1.0, 1.0, 0.0};
+    const double av[] = {100.0, 2.0, -100.0, 1.0,  7.0,  0.5,
+                         -7.0,  0.5, 1.0,    50.0, -50.0};
+    const int ac[] = {0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1};
+    const int ap[] = {0, 4, 8, 11};
+    const int dc[] = {0, 1, 0, 1}, dp[] = {0, 2, 4};
+    const NanoqspCSR cs_D = {2, 4, D, dc, dp};
+    const NanoqspCSR cs_A = {3, 11, av, ac, ap};
+    const double lb[] = {-2.0, -2.0}, ub[] = {2.0, 2.0};
+    const double la[] = {1.0, 0.5, -1.0}, ua[] = {1.0, 0.5, 1.0};
+    const double expected[] = {0.0, 0.5};
+    double dense_x[] = {0.0, 0.0};
+    double workspace[23]; /* exact 7*n + 3*m allocation-free workspace */
+    config.workspace = workspace;
+    config.workspace_size = 23;
+    int rd =
+        nanoqsp_solve_affine(2, 3, D, d, A, lb, ub, la, ua, dense_x, &config);
+    int rs = nanoqsp_solve_affine_sparse(2, 3, &cs_D, d, &cs_A, lb, ub, la, ua,
+                                         x, &config);
+    if (numerical_solution(rd, 2, dense_x, expected, 1e-7) ||
+        numerical_solution(rs, 2, x, expected, 1e-7))
+      return -10;
+
+    /* scalar cancellation case previously stalled preconditioner scaling */
+    const double one[] = {1.0}, zero[] = {0.0};
+    const double values[] = {1e5, -1e5, 1.0};
+    const int cols[] = {0, 0, 0}, ptr[] = {0, 3}, dptr[] = {0, 1};
+    const NanoqspCSR scalar_D = {1, 1, one, cols, dptr};
+    const NanoqspCSR scalar_A = {1, 3, values, cols, ptr};
+    x[0] = 0.0;
+    rs = nanoqsp_solve_affine_sparse(1, 1, &scalar_D, zero, &scalar_A, NULL,
+                                     NULL, one, one, x, &config);
+    return numerical_solution(rs, 1, x, one, 1e-7);
+  }
   return -99;
 }
 
